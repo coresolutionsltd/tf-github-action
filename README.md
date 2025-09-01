@@ -5,22 +5,35 @@
 * [Description](#description)
 * [Inputs](#inputs)
 * [Usage](#usage)
-* [Usage](#usage-1)
 * [Usage Examples](#usage-examples)
-  * [Using multiline tfvars](#using-multiline-tfvars)
+  * [Basic Usage](#basic-usage)
+    * [Validate Only](#validate-only)
+    * [Plan Only](#plan-only)
+    * [Plan and Apply](#plan-and-apply)
+  * [Variable Configuration Examples](#variable-configuration-examples)
+    * [Using tfvar Files (Comma-separated)](#using-tfvar-files-comma-separated)
+    * [Inline Variables (Newline-separated)](#inline-variables-newline-separated)
+    * [Mixed Variable Sources](#mixed-variable-sources)
+  * [Backend Configuration Examples](#backend-configuration-examples)
+    * [Backend Configuration Files](#backend-configuration-files)
+    * [Inline Backend Configuration](#inline-backend-configuration)
+  * [Approval Gates](#approval-gates)
+    * [Separate Plan and Apply Jobs](#separate-plan-and-apply-jobs)
 * [Contributing](#contributing)
-  * [Commit style](#commit-style)
-  * [Pre Commit](#pre-commit)
+  * [Guidelines](#guidelines)
+  * [Contribution Workflow](#contribution-workflow)
+
+<!-- Regenerate with "pre-commit run -a markdown-toc" -->
 
 <!-- tocstop -->
 
 <!-- action-docs-description source="action.yml" -->
 ## Description
 
-This action will **validate**, **plan**, and **apply** your OpenTofu configuration.
-Pull Requests and Action summaries are automatically updated with the results, providing clear visibility into validation issues, proposed infrastructure changes and applied results.
-
+This action will validate, plan and apply your OpenTofu configuration.
 <!-- action-docs-description source="action.yml" -->
+
+Workflow summaries are automatically updated from the different stages, this makes it easier to see validation issues, planned changed and apply results. Pull requests are decorated with a concise overview — giving you instant visibility at a glance.
 
 <!-- action-docs-inputs source="action.yml" -->
 ## Inputs
@@ -97,65 +110,9 @@ Pull Requests and Action summaries are automatically updated with the results, p
 ```
 <!-- action-docs-usage action="action.yml" project="coresolutionsltd/tf-github-action" version="main" -->
 
-## Usage
-
-```yaml
-- uses: @
-  with:
-    version:
-    # The OpenTofu version to install (e.g., 1.10.x).
-    #
-    # Required: false
-    # Default: 1.10.x
-
-    workdir:
-    # Path to the TF configuration directory (relative to repository root).
-    #
-    # Required: false
-    # Default: .
-
-    env:
-    # Deployment environment (eg `dev`, `staging` or `prod`). Accepts any string.
-    #
-    # Required: false
-    # Default: ""
-
-    steps:
-    # Steps to run: `validate`, `plan`, `apply` (comma, space or newline separated). Use `all`` to run all steps.
-    #
-    # Required: false
-    # Default: all
-
-    tfvar-files:
-    # Comma, space or newline separated list of tfvar files to include
-    #
-    # Required: false
-    # Default: ""
-
-    tfvars:
-    # Comma, space or newline separated key-value pairs for terraform variables (format: key1=value1)
-    #
-    # Required: false
-    # Default: ""
-
-    backend-config-var-files:
-    # Comma, space or newline  separated list of backend config files to include
-    #
-    # Required: false
-    # Default: ""
-
-    backend-config-vars:
-    # Comma, space or newline separated key-value pairs for backend configuration (format: key1=value1)
-    #
-    # Required: false
-    # Default: ""
-```
-<!-- action-docs-usage action="action.yml" -->
-
-
 ## Usage Examples
 
-This section provides comprehensive examples of how to use the TF GitHub Action in various scenarios, from simple validation to complex multi-environment deployments with approval gates.
+This section provides examples of how to use the TF GitHub Action in various scenarios, from simple validation to multi-environment deployments with approval gates.
 
 ### Basic Usage
 
@@ -175,7 +132,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Validate Configuration
         uses: coresolutionsltd/tf-github-action@main
         with:
@@ -199,7 +156,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Plan Changes
         uses: coresolutionsltd/tf-github-action@main
         with:
@@ -224,7 +181,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Deploy to Development Environment
         uses: coresolutionsltd/tf-github-action@main
         with:
@@ -247,7 +204,7 @@ Load multiple variable files to configure your infrastructure with shared and en
     tfvar-files: common.tfvars, prod.tfvars
     steps: all
 ```
-> `tfvar-files` can be comma, space or newline seperated.
+> `tfvar-files` can be comma, space or newline separated.
 
 #### Inline Variables (Newline-separated)
 Pass variables directly in the workflow for simple configurations or dynamic values.
@@ -336,7 +293,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Plan Production Changes
         uses: coresolutionsltd/tf-github-action@main
         with:
@@ -345,7 +302,7 @@ jobs:
           tfvar-files: base.tfvars, prod.tfvars
           tfvars: build_number=${{ github.run_number }}
           steps: validate plan
-  
+
   apply:
     name: Apply Infrastructure Changes
     runs-on: ubuntu-latest
@@ -353,18 +310,16 @@ jobs:
     environment: prod  # This environment can have protection rules
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Apply Production Changes
         uses: coresolutionsltd/tf-github-action@main
         with:
           workdir: ./infra
-          env: prod
+          env: prod  # env must match what is planned
           steps: apply  # Only apply, plan artifact is downloaded automatically
 ```
 
 These examples are meant to give you the building blocks for putting together a complete infrastructure deployment workflow. You can mix and match them to create pipelines that validate, plan, and apply your configuration, while also adding steps for review and approval where it makes sense.
-
-When you’re running on a pull request, the action will automatically detect it and decorate the PR with the results of the workflow — making it easy to see at a glance what’s going on.
 
 Use these patterns as starting points and adapt them to fit the way your team works.
 
