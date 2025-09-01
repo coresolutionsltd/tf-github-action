@@ -1,0 +1,650 @@
+name: TF GitHub Action
+description: This action will validate, plan and apply your OpenTofu configuration.
+
+inputs:
+  version:
+    description: "The OpenTofu version to install (e.g., 1.10.x)."
+    required: false
+    default: "1.10.x"
+  workdir:
+    description: "Path to the TF configuration directory (relative to repository root)."
+    required: false
+    default: "."
+  env:
+    description: "Deployment environment (eg `dev`, `staging` or `prod`). Accepts any string."
+    required: false
+    default: ""
+  steps:
+    description: 'Steps to run: `validate`, `plan`, `apply` (comma, space or newline separated). Use `all`` to run all steps.'
+    required: false
+    default: 'all'
+  tfvar-files:
+    description: 'Comma, space or newline separated list of tfvar files to include'
+    required: false
+    default: ''
+  tfvars:
+    description: 'Comma, space or newline separated key-value pairs for terraform variables (format: key1=value1)'
+    required: false
+    default: ''
+  backend-config-var-files:
+    description: 'Comma, space or newline  separated list of backend config files to include'
+    required: false
+    default: ''
+  backend-config-vars:
+    description: 'Comma, space or newline separated key-value pairs for backend configuration (format: key1=value1)'
+    required: false
+    default: ''
+
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup OpenTofu
+      uses: opentofu/setup-opentofu@v1
+      with:
+        tofu_version: ${{ inputs.version }}
+        tofu_wrapper: false
+
+    - name: Parse backend config files
+      id: parse-backend-config-files
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        BACKEND_CONFIG_FILES="${{ inputs.backend-config-var-files }}"
+        BACKEND_CONFIG_ARGS=""
+
+        if [ -n "$BACKEND_CONFIG_FILES" ]; then
+          NORMALISED_FILES=$(echo "$BACKEND_CONFIG_FILES" | tr '\n,' ' ' | tr -s ' ')
+
+          # Convert to array and build -backend-config arguments
+          for file in $NORMALISED_FILES; do
+            # Trim whitespace
+            file=$(echo "$file" | xargs)
+            if [ -n "$file" ]; then
+              # Verify file exists
+              if [ -f "$file" ]; then
+                BACKEND_CONFIG_ARGS="$BACKEND_CONFIG_ARGS -backend-config=$file"
+                echo "Added backend config file: $file"
+              else
+                echo "Warning: backend config file not found: $file"
+                exit 1
+              fi
+            fi
+          done
+
+          # Remove leading space
+          BACKEND_CONFIG_ARGS=$(echo "$BACKEND_CONFIG_ARGS" | sed 's/^ *//')
+        fi
+
+        echo "backend-config-file-args=$BACKEND_CONFIG_ARGS" >> $GITHUB_OUTPUT
+        echo "Backend config file arguments: $BACKEND_CONFIG_ARGS"
+
+    - name: Parse backend config vars
+      id: parse-backend-config-vars
+      shell: bash
+      run: |
+        BACKEND_CONFIG_VARS="${{ inputs.backend-config-vars }}"
+        BACKEND_CONFIG_ARGS=""
+
+        if [ -n "$BACKEND_CONFIG_VARS" ]; then
+          # Handle spaces, newlines, and commas as separators
+          # First normalize all separators to spaces, then split on spaces
+          NORMALISED_VARS=$(echo "$BACKEND_CONFIG_VARS" | tr '\n,' ' ' | tr -s ' ')
+
+          # Split by spaces and process each key=value pair
+          read -ra PAIRS <<< "$NORMALISED_VARS"
+          for pair in "${PAIRS[@]}"; do
+            pair=$(echo "$pair" | xargs)
+            if [ -n "$pair" ]; then
+              # Validate key=value format (backend config keys can be more flexible)
+              if [[ "$pair" =~ ^[a-zA-Z_][a-zA-Z0-9_.-]*=.* ]]; then
+                BACKEND_CONFIG_ARGS="$BACKEND_CONFIG_ARGS -backend-config=$pair"
+                echo "Added backend config: ${pair%%=*}"
+              else
+                echo "Error: Invalid backend config format: $pair"
+                echo "Expected format: key=value"
+                exit 1
+              fi
+            fi
+          done
+
+          # Remove leading space
+          BACKEND_CONFIG_ARGS=$(echo "$BACKEND_CONFIG_ARGS" | sed 's/^ *//')
+        fi
+
+        echo "backend-config-args=$BACKEND_CONFIG_ARGS" >> $GITHUB_OUTPUT
+        echo "Backend config arguments: $BACKEND_CONFIG_ARGS"
+
+    - name: Init
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        tofu init ${{ steps.parse-backend-config-files.outputs.backend-config-file-args }} \
+        ${{ steps.parse-backend-config-vars.outputs.backend-config-args }}
+
+    - name: Parse tfvar files
+      id: parse-tfvar-files
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        TFVAR_FILES="${{ inputs.tfvar-files }}"
+        TFVAR_ARGS=""
+
+        if [ -n "$TFVAR_FILES" ]; then
+          # Handle spaces, newlines, and commas as separators
+          NORMALISED_FILES=$(echo "$TFVAR_FILES" | tr '\n,' ' ' | tr -s ' ')
+
+          # Convert to array and build -var-file arguments
+          for file in $NORMALISED_FILES; do
+            # Trim whitespace
+            file=$(echo "$file" | xargs)
+            if [ -n "$file" ]; then
+              # Verify file exists
+              if [ -f "$file" ]; then
+                TFVAR_ARGS="$TFVAR_ARGS -var-file=$file"
+                echo "Added tfvar file: $file"
+              else
+                echo "Warning: tfvar file not found: $file"
+                exit 1
+              fi
+            fi
+          done
+
+          # Remove leading space
+          TFVAR_ARGS=$(echo "$TFVAR_ARGS" | sed 's/^ *//')
+        fi
+
+        echo "tfvar-file-args=$TFVAR_ARGS" >> $GITHUB_OUTPUT
+        echo "Tfvar file arguments: $TFVAR_ARGS"
+
+    - name: Parse tfvars
+      id: parse-tfvars
+      shell: bash
+      run: |
+        TFVARS="${{ inputs.tfvars }}"
+        TFVAR_ARGS=""
+
+        if [ -n "$TFVARS" ]; then
+          # Handle spaces, newlines, and commas as separators
+          NORMALISED_VARS=$(echo "$TFVARS" | tr '\n,' ' ' | tr -s ' ')
+
+          # Split by spaces and process each key=value pair
+          read -ra PAIRS <<< "$NORMALISED_VARS"
+          for pair in "${PAIRS[@]}"; do
+            pair=$(echo "$pair" | xargs)
+            if [ -n "$pair" ]; then
+              # Validate key=value format
+              if [[ "$pair" =~ ^[a-zA-Z_][a-zA-Z0-9_]*=.* ]]; then
+                TFVAR_ARGS="$TFVAR_ARGS -var=$pair"
+                echo "Added tfvar: ${pair%%=*}"
+              else
+                echo "Error: Invalid tfvar format: $pair"
+                echo "Expected format: key=value"
+                exit 1
+              fi
+            fi
+          done
+
+          # Remove leading space
+          TFVAR_ARGS=$(echo "$TFVAR_ARGS" | sed 's/^ *//')
+        fi
+
+        echo "tfvar-args=$TFVAR_ARGS" >> $GITHUB_OUTPUT
+
+    - name: Validate
+      id: validate
+      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'validate') }}
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        set +e
+        FMT_DIFF=$(tofu fmt -check -diff)
+        FMT_SUMMARY=$(tofu fmt -check | xargs)
+        VALIDATE_JSON=$(tofu validate ${{ steps.parse-tfvar-files.outputs.tfvar-file-args }} ${{ steps.parse-tfvars.outputs.tfvar-args }} -json)
+        IS_VALID=$(echo "$VALIDATE_JSON" | jq -r '.valid')
+        set -e
+
+        CURRENT_BRANCH=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}
+
+        VALIDATION_SUMMARY="| Check | Status | Details |
+        |-------|--------|---------|
+        "
+        VALIDATION_ERRORS=""
+
+        HAS_FAILURES=false
+
+        if [ -n $FMT_SUMMARY ]; then
+          echo "fmt_failed=false" >> $GITHUB_OUTPUT
+          VALIDATION_SUMMARY+="| 🎯 Format | ✅ Pass | All files are properly formatted |
+          "
+        else
+          # Output fmt failure flag
+          echo "fmt_failed=true" >> $GITHUB_OUTPUT
+          HAS_FAILURES=true
+
+          # Output fmt summary
+          echo "fmt_summary=$FMT_SUMMARY" >> $GITHUB_OUTPUT
+
+          VALIDATION_SUMMARY+="| 🎯 Format | ❌ Fail | \`$FMT_SUMMARY\` |
+          "
+          VALIDATION_ERRORS+="### 🎯 Format Issues
+          Format validation has failed on the following files: **$FMT_SUMMARY**
+
+          🔧 Changes Required:
+          \`\`\`diff
+          $FMT_DIFF
+          \`\`\`
+
+          > [!NOTE]
+          > Running \`tofu fmt --recursive\` from your repository will auto fix these formatting issues.
+          > Better yet, set this up in your [pre-commit config](https://github.com/tofuutils/pre-commit-opentofu?tab=readme-ov-file#tofu_fmt) to never let formatting issues break a pipeline ever again!
+
+          "
+        fi
+
+        if [ "$IS_VALID" = "true" ]; then
+          echo "validate_failed=false" >> $GITHUB_OUTPUT
+          VALIDATION_SUMMARY+="| 🔍 Validate | ✅ Pass | Configuration is valid |
+          "
+        else
+          echo "validate_failed=true" >> $GITHUB_OUTPUT
+          HAS_FAILURES=true
+
+          # Count different error types
+          TOTAL_VALIDATE_ERRORS=$(echo "$VALIDATE_JSON" | jq -r '.error_count // 0')
+
+          # Group errors by summary
+          VALIDATE_SUMMARY=$(echo "$VALIDATE_JSON" | jq -r '
+            [.diagnostics[] | .summary] |
+            group_by(.) |
+            map({
+              summary: .[0],
+              count: length
+            }) |
+            map(
+              if .count == 1 then
+                (.count | tostring) + " " + (.summary | ascii_downcase)
+              else
+                (.count | tostring) + " " + (.summary | ascii_downcase) + "s"
+              end
+            ) |
+            if length == 1 then
+              .[0]
+            elif length == 2 then
+              .[0] + " & " + .[1]
+            else
+              (.[0:-1] | join(", ")) + " & " + .[-1]
+            end
+          ')
+
+          # Generate detailed validate output
+          VALIDATE_DETAILED=$(echo "$VALIDATE_JSON" | jq -r --arg branch "$CURRENT_BRANCH" --arg workdir "${{ inputs.workdir }}" '
+            .diagnostics[] |
+            "**" + (.severity[0:1] | ascii_upcase) + .severity[1:] + ":** " + .summary + "\n" +
+            "**Detail:** " + .detail + "\n" +
+            (if .address then "**Resource:** `" + .address + "`\n" else "" end) +
+            "**File:** `" + .range.filename + "` (Line " + (.range.start.line | tostring) + ", Column " + (.range.start.column | tostring) + ")\n" +
+            (
+              if env.GITHUB_SERVER_URL and env.GITHUB_REPOSITORY then
+                " 📍 [View in file](" +
+                env.GITHUB_SERVER_URL + "/" +
+                env.GITHUB_REPOSITORY + "/blob/" +
+                $branch + "/" +
+                $workdir + "/" +
+                .range.filename + "#L" +
+                (.range.start.line | tostring) + "-L" +
+                (.range.end.line | tostring) + ")\n"
+              else "" end
+            ) +
+            "# \n"
+          ')
+
+          VALIDATION_SUMMARY+="| 🎯 Validate | ❌ Fail | $VALIDATE_SUMMARY |
+          "
+
+          # Output validate summary
+          echo "validate_summary=$VALIDATE_SUMMARY" >> $GITHUB_OUTPUT
+
+          VALIDATION_ERRORS+="
+          ### ⚠️ Syntax / Configuration Issues
+          Syntax Validation Failed with **$TOTAL_VALIDATE_ERRORS** errors
+
+          $VALIDATE_DETAILED
+          "
+        fi
+
+        echo "has_failures=$HAS_FAILURES" >> $GITHUB_OUTPUT
+
+        cat >> $GITHUB_STEP_SUMMARY << VALIDATION_EOF
+        ## 🧪 Validate
+
+        $VALIDATION_SUMMARY
+
+        $VALIDATION_ERRORS
+
+        VALIDATION_EOF
+
+
+    - name: Validate Comment
+      if: ${{ github.event_name == 'pull_request' && (inputs.steps == 'all' || contains(inputs.steps, 'validate')) }}
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          })
+          const planComment = comments.find(comment => {
+            return comment.user.type === 'Bot' && comment.body.includes('TF Validate Results')
+          })
+          const hasFailures = ${{ steps.validate.outputs.has_failures }};
+          const fmtFailed = ${{ steps.validate.outputs.fmt_failed }};
+          const validateFailed = ${{ steps.validate.outputs.validate_failed }};
+
+          let tableRows = [];
+
+          // Add format row
+          if (fmtFailed) {
+            tableRows.push(`| 🎯 Format | ❌ Fail | \`${{ steps.validate.outputs.fmt_summary }}\` |`);
+          } else {
+            tableRows.push(`| 🎯 Format | ✅ Pass | All files are properly formatted |`);
+          }
+
+          // Add validate row
+          if (validateFailed) {
+            tableRows.push(`| 🔍 Validate | ❌ Fail | ${{ steps.validate.outputs.validate_summary }} |`);
+          } else {
+            tableRows.push(`| 🔍 Validate | ✅ Pass | Configuration is valid |`);
+          }
+
+          let validationResults = `### 🧪 TF Validate Results
+          | Check | Status | Details |
+          |-------|--------|---------|
+          ${tableRows.join('\n')}`;
+
+          if (hasFailures) {
+            validationResults += `\n\nFailure details can be found in the [Validate Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+          } else {
+            validationResults += `\n\nAll checks **passed!** 🎉`;
+          }
+
+          if (planComment) {
+            github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: planComment.id,
+              body: validationResults
+            })
+          } else {
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: validationResults
+            })
+          }
+
+    - name: Check for validation failures
+      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'validate') }}
+      shell: bash
+      run: |
+        FAILURES=0
+
+        if [[ "${{ steps.validate.outputs.fmt_failed }}" == "true" ]]; then
+          echo "::error::Format validation failed"
+          FAILURES=$((FAILURES + 1))
+        fi
+
+        if [[ "${{ steps.validate.outputs.validate_failed }}" == "true" ]]; then
+          echo "::error::Validation checks failed"
+          FAILURES=$((FAILURES + 1))
+        fi
+
+        if [[ $FAILURES -gt 0 ]]; then
+          exit 1
+        else
+          echo "::notice::All validation checks passed"
+        fi
+
+    - name: Plan
+      id: plan
+      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'plan') }}
+      working-directory: ${{ inputs.workdir }}
+      env:
+        PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
+      shell: bash
+      run: |
+        tofu plan ${{ steps.parse-tfvar-files.outputs.tfvar-file-args }} ${{ steps.parse-tfvars.outputs.tfvar-args }} -input=false -out $PLAN_NAME.tfplan
+        PLAN=$(tofu show -no-color $PLAN_NAME.tfplan)
+        PLAN_JSON=$(tofu show -json $PLAN_NAME.tfplan)
+        gzip -9 $PLAN_NAME.tfplan
+
+        # Extract summary info
+        CREATE_COUNT=$(echo "$PLAN_JSON" | jq '[.resource_changes[]? | select(.change.actions[]? == "create")] | length')
+        UPDATE_COUNT=$(echo "$PLAN_JSON" | jq '[.resource_changes[]? | select(.change.actions[]? == "update")] | length')
+        DESTROY_COUNT=$(echo "$PLAN_JSON" | jq '[.resource_changes[]? | select(.change.actions[]? == "delete")] | length')
+
+        # Determine if any changes are detected in the plan
+        if [ "$CREATE_COUNT" -gt 0 ] || [ "$UPDATE_COUNT" -gt 0 ] || [ "$DESTROY_COUNT" -gt 0 ]; then
+          CHANGES=true
+        else
+          CHANGES=false
+        fi
+
+        cat >> $GITHUB_STEP_SUMMARY << PLAN_EOF
+        ## 🏗️ Plan
+
+        | Action | Count |
+        |--------|-------|
+        | ➕ Create | $CREATE_COUNT |
+        | 🔄 Update | $UPDATE_COUNT |
+        | ❌ Destroy | $DESTROY_COUNT |
+
+        \`\`\`hcl
+        $PLAN
+        \`\`\`
+        ---
+
+        PLAN_EOF
+
+        # Output has_changes boolean
+        echo "has_changes=$CHANGES" >> $GITHUB_OUTPUT
+
+        # Output counts
+        echo "create_count=$CREATE_COUNT" >> $GITHUB_OUTPUT
+        echo "update_count=$UPDATE_COUNT" >> $GITHUB_OUTPUT
+        echo "destroy_count=$DESTROY_COUNT" >> $GITHUB_OUTPUT
+
+        echo "::notice::$PLAN_NAME.tfplan created"
+
+    - name: PR Plan Comment
+      if: ${{ github.event_name == 'pull_request' && (inputs.steps == 'all' || contains(inputs.steps, 'plan')) }}
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          })
+          const planComment = comments.find(comment => {
+            return comment.user.type === 'Bot' && comment.body.includes('TF Plan Summary')
+          })
+          const hasChanges = ${{ steps.plan.outputs.has_changes }};
+
+          const summaryTable = `
+          | Action | Count |
+          |--------|-------|
+          | ➕ Create | ${{ steps.plan.outputs.create_count }} |
+          | 🔄 Update | ${{ steps.plan.outputs.update_count }} |
+          | ❌ Destroy | ${{ steps.plan.outputs.destroy_count }} |
+          `;
+
+          let plan = '';
+
+          if (hasChanges) {
+            plan = `### 🏗️ TF Plan Summary
+            ${summaryTable}
+
+            Full plan can be found in the [Plan Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+          } else {
+            plan = `#### 🏗️ TF Plan Summary
+            ${summaryTable}
+
+            \`\`\`hcl
+            No changes. Your infrastructure matches the configuration.
+            \`\`\``;
+          }
+
+          if (planComment) {
+            github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: planComment.id,
+              body: plan
+            })
+          } else {
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: plan
+            })
+          }
+
+    - name: Upload Plan
+      id: upload-plan
+      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'plan') }}
+      env:
+        PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.PLAN_NAME }}
+        path: ${{ inputs.workdir }}/${{ env.PLAN_NAME }}.tfplan.gz
+
+    - name: Download Plan
+      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'apply') }}
+      env:
+        PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.PLAN_NAME }}
+        path: ${{ inputs.workdir }}
+
+    - name: Apply
+      id: apply
+      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'apply') }}
+      working-directory: ${{ inputs.workdir }}
+      env:
+        PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
+      shell: bash
+      run: |
+        gunzip $PLAN_NAME.tfplan.gz
+        tofu apply -input=false -auto-approve -json -concise $PLAN_NAME.tfplan 2>&1 | tee apply_output.json
+        APPLY_OUTPUT=$(cat apply_output.json)
+
+        # Get the final change summary
+        APPLY_SUMMARY=$(echo $APPLY_OUTPUT | jq -r '
+        select(.type == "change_summary" and .changes.operation == "apply") |
+        "ADDED=\(.changes.add);CHANGED=\(.changes.change);DESTROYED=\(.changes.remove);IMPORTED=\(.changes.import // 0);FORGOTTEN=\(.changes.forget // 0)"
+        ' | tail -1)
+
+        # Extract individual counts
+        eval $APPLY_SUMMARY
+
+        RESOURCE_CHANGES=$(echo $APPLY_OUTPUT | jq -r '
+          select(.type == "apply_complete") |
+          .hook.action as $action |
+          .hook.resource.resource_type + .hook.resource.resource_name as $resource |
+          "." + $resource + " (" +
+          (if $action == "create" then "created"
+          elif $action == "update" then "updated"
+          elif $action == "delete" then "destroyed"
+          else $action end) + ")"
+        ')
+
+        # Get any outputs
+        OUTPUTS=$(echo $APPLY_OUTPUT | jq -r '
+          select(.type == "outputs") |
+          if (.outputs | length) > 0 then
+            .outputs | to_entries[] | "- **\(.key)**: \(.value.value)"
+          else
+            "No outputs"
+          end
+        ')
+
+        cat >> $GITHUB_STEP_SUMMARY << APPLY_EOF
+        ## 🚀 Apply
+
+        ### Summary
+        **Resources:** ${ADDED} added, ${CHANGED} changed, ${DESTROYED} destroyed
+
+        $(if [ ${IMPORTED} -gt 0 ]; then echo "**Imported:** ${IMPORTED}"; fi)
+        $(if [ ${FORGOTTEN} -gt 0 ]; then echo "**Forgotten:** ${FORGOTTEN}"; fi)
+
+        ### Resource Changes
+        ${RESOURCE_CHANGES}
+
+        ### Outputs
+        ${OUTPUTS}
+        APPLY_EOF
+
+        echo "added=${ADDED:-0}" >> $GITHUB_OUTPUT
+        echo "changed=${CHANGED:-0}" >> $GITHUB_OUTPUT
+        echo "destroyed=${DESTROYED:-0}" >> $GITHUB_OUTPUT
+        echo "imported=${IMPORTED:-0}" >> $GITHUB_OUTPUT
+        echo "forgotten=${FORGOTTEN:-0}" >> $GITHUB_OUTPUT
+
+        # Calculate has_changed (true if any destructive changes occurred)
+        if [ ${ADDED:-0} -gt 0 ] || [ ${CHANGED:-0} -gt 0 ] || [ ${DESTROYED:-0} -gt 0 ]; then
+          echo "has_changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_changed=false" >> $GITHUB_OUTPUT
+        fi
+
+        echo "::notice::$PLAN_NAME.tfplan applied!"
+
+    - name: PR Apply Comment
+      if: ${{ github.event_name == 'pull_request' && (inputs.steps == 'all' || contains(inputs.steps, 'apply')) }}
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          })
+          const applyComment = comments.find(comment => {
+            return comment.user.type === 'Bot' && comment.body.includes('TF Apply Summary')
+          })
+
+          const added = ${{ steps.apply.outputs.added }};
+          const changed = ${{ steps.apply.outputs.changed }};
+          const destroyed = ${{ steps.apply.outputs.destroyed }};
+          const imported = ${{ steps.apply.outputs.imported }};
+          const forgotten = ${{ steps.apply.outputs.forgotten }};
+
+          let applySummary = `### 🚀 TF Apply Summary
+          **Resources:** ${added} added, ${changed} changed, ${destroyed} destroyed
+          ${imported > 0 ? `**Imported:** ${imported}` : ''}
+          ${forgotten > 0 ? `**Forgotten:** ${forgotten}` : ''}
+
+          Full apply output can be found in the [Apply Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+
+          if (applyComment) {
+            github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: applyComment.id,
+              body: applySummary
+            })
+          } else {
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: applySummary
+            })
+          }
