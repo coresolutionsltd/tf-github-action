@@ -1,6 +1,10 @@
 name: TF GitHub Action
 description: This action will validate, plan and apply your OpenTofu configuration.
 
+branding:
+  icon: 'arrow-up'
+  color: 'yellow'
+
 inputs:
   version:
     description: "The OpenTofu version to install (e.g., 1.10.x)."
