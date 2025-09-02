@@ -354,9 +354,6 @@ We welcome contributions to improve our GitHub Action!
   - Update documentation where relevant.
   - Keep PRs focused and small where possible.
 
-- **Code of Conduct**
-  - Please review and follow our [Code of Conduct](CODE_OF_CONDUCT.md) when contributing.
-
 ### Contribution Workflow
 1. Open an issue to propose a change.
 2. Fork the repo and create a feature branch.
