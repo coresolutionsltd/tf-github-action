@@ -1,0 +1,255 @@
+name: Test TF Action
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  actions: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Test valid Terraform configurations (happy path)
+  test-valid-configs:
+    name: Test Valid Configurations
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test-case:
+          - name: "Basic validation"
+            workdir: "test/valid"
+            env: "basic"
+
+          - name: "With tfvar file"
+            workdir: "test/valid"
+            tfvar-files: "test.tfvars"
+            env: "tfvar-file"
+
+          - name: "With inline tfvars (comma-separated)"
+            workdir: "test/valid"
+            tfvars: "env=test,region=us-east-1"
+            env: "comma-seperated-inline-tfvars"
+
+          - name: "With inline tfvars (space-separated)"
+            workdir: "test/valid"
+            tfvars: "env=staging region=us-west-2"
+            env: "space-seperated-inline-tfvars"
+
+          - name: "With multiline tfvars"
+            workdir: "test/valid"
+            tfvars: |
+              env=staging
+              region=eu-west-1
+            env: "multiline-tfvars"
+
+          - name: "With inline backend config"
+            workdir: "test/valid"
+            backend-config-vars: "path=custom.tfstate"
+            env: "backend-config-vars"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test TF Action - ${{ matrix.test-case.name }}
+        id: tf-action-valid-test
+        uses: ./
+        with:
+          workdir: ${{ matrix.test-case.workdir }}
+          tfvar-files: ${{ matrix.test-case.tfvar-files }}
+          tfvars: ${{ matrix.test-case.tfvars }}
+          backend-config-vars: ${{ matrix.test-case.backend-config-vars }}
+          env: ${{ matrix.test-case.env }}
+          steps: validate,plan,apply
+          comment-mode: off
+          summary-mode: redacted
+
+      - name: Verify action succeeded
+        run: |
+          if [ "${{ steps.tf-action-valid-test.outcome }}" != "success" ]; then
+            echo "❌ Test failed: ${{ matrix.test-case.name }}"
+            exit 1
+          else
+            echo "✅ Test passed: ${{ matrix.test-case.name }}"
+          fi
+
+  # Test invalid Terraform configurations (failure scenarios)
+  test-invalid-configs:
+    name: Test Invalid Configurations
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test-case:
+          - name: "Invalid syntax"
+            workdir: "test/invalid"
+          - name: "Format failure"
+            workdir: "test/fmt"
+          - name: "Missing backend config file"
+            workdir: "test/valid"
+            backend-config-var-files: "missing-backend.conf"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test TF Action - ${{ matrix.test-case.name }}
+        id: tf-action-invalid-test
+        continue-on-error: true
+        uses: ./
+        with:
+          workdir: ${{ matrix.test-case.workdir }}
+          backend-config-var-files: ${{ matrix.test-case.backend-config-var-files }}
+          steps: validate
+          comment-mode: off
+          summary-mode: redacted
+
+      - name: Verify action failed as expected
+        run: |
+          if [ "${{ steps.tf-action-invalid-test.outcome }}" == "success" ]; then
+            echo "❌ Test failed: Expected failure but action succeeded for ${{ matrix.test-case.name }}"
+            exit 1
+          else
+            echo "✅ Test passed: Action correctly failed for ${{ matrix.test-case.name }}"
+          fi
+
+  plan-artifact:
+    name: Plan Artifact for Apply-Only Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create plan artifact for apply-only
+        uses: ./
+        with:
+          workdir: test/valid
+          env: apply-artifact
+          steps: plan
+          comment-mode: off
+          summary-mode: redacted
+
+  apply-only-with-plan:
+    name: Apply Only Using Existing Plan Artifact
+    runs-on: ubuntu-latest
+    needs: plan-artifact
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Apply using existing plan artifact
+        id: tf-action-apply-only
+        uses: ./
+        with:
+          workdir: test/valid
+          env: apply-artifact
+          steps: apply
+          comment-mode: off
+          summary-mode: redacted
+
+      - name: Verify apply succeeded
+        run: |
+          if [ "${{ steps.tf-action-apply-only.outcome }}" != "success" ]; then
+            echo "❌ Apply-only test failed"
+            exit 1
+          else
+            echo "✅ Apply-only test passed"
+          fi
+
+  apply-only-without-plan:
+    name: Apply Only Without Plan Artifact (Expected Failure)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Apply without plan artifact
+        id: tf-action-apply-no-plan
+        continue-on-error: true
+        uses: ./
+        with:
+          workdir: test/valid
+          env: missing-plan
+          steps: apply
+          comment-mode: off
+          summary-mode: redacted
+
+      - name: Verify apply failed as expected
+        run: |
+          if [ "${{ steps.tf-action-apply-no-plan.outcome }}" == "success" ]; then
+            echo "❌ Apply-only without plan should have failed"
+            exit 1
+          else
+            echo "✅ Apply-only without plan failed as expected"
+          fi
+
+  validate-empty-config:
+    name: Validate Empty Config Directory (Expected Success)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate empty directory
+        id: tf-action-empty-validate
+        uses: ./
+        with:
+          workdir: test/empty
+          steps: validate
+          comment-mode: off
+          summary-mode: redacted
+
+      - name: Verify validate succeeded
+        run: |
+          if [ "${{ steps.tf-action-empty-validate.outcome }}" != "success" ]; then
+            echo "❌ Empty config validation failed"
+            exit 1
+          else
+            echo "✅ Empty config validation passed"
+          fi
+
+  summary-modes-plan-apply:
+    name: Summary Modes (Plan+Apply, ${{ matrix.summary-mode }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        summary-mode:
+          - full
+          - redacted
+          - off
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Plan and apply with summary mode
+        uses: ./
+        with:
+          workdir: test/valid
+          env: summary-${{ matrix.summary-mode }}
+          steps: plan,apply
+          summary-mode: ${{ matrix.summary-mode }}
+          comment-mode: off
+          skip-plan-upload: true
+
+  pr-comment-smoke:
+    name: PR Comment Smoke (Validate/Plan/Apply)
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run action with PR comments
+        uses: ./
+        with:
+          workdir: test/valid
+          env: pr-comment
+          steps: validate,plan,apply
+          comment-mode: sticky
+          comment-identifier: tf-github-action
+          summary-mode: redacted
+          skip-plan-upload: true

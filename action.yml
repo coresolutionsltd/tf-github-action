@@ -7,9 +7,9 @@ branding:
 
 inputs:
   version:
-    description: "The OpenTofu version to install (e.g., 1.10.x)."
+    description: "The OpenTofu version to install (e.g., 1.11.x)."
     required: false
-    default: "1.10.x"
+    default: "1.11.x"
   workdir:
     description: "Path to the TF configuration directory (relative to repository root)."
     required: false
@@ -38,6 +38,42 @@ inputs:
     description: 'Comma, space or newline separated key-value pairs for backend configuration (format: key1=value1)'
     required: false
     default: ''
+  lock-timeout:
+    description: 'State lock timeout for plan/apply (e.g., 5m)'
+    required: false
+    default: ''
+  parallelism:
+    description: 'Parallelism for plan/apply'
+    required: false
+    default: ''
+  refresh:
+    description: 'Refresh behavior for plan/apply (`true` or `false`)'
+    required: false
+    default: ''
+  targets:
+    description: 'Comma, space or newline separated list of target resources for plan/apply'
+    required: false
+    default: ''
+  artifact-retention-days:
+    description: 'Retention days for plan artifacts (1-90). Leave empty to use repository default'
+    required: false
+    default: ''
+  skip-plan-upload:
+    description: 'Skip uploading the plan artifact'
+    required: false
+    default: 'false'
+  summary-mode:
+    description: 'Plan/apply summary mode: `full`, `redacted`, or `off`'
+    required: false
+    default: 'full'
+  comment-mode:
+    description: 'PR comment mode: `sticky` to update a single comment or `off` to disable comments'
+    required: false
+    default: 'sticky'
+  comment-identifier:
+    description: 'Identifier used to find/update sticky PR comments'
+    required: false
+    default: 'tf-github-action'
 
 
 runs:
@@ -49,12 +85,125 @@ runs:
         tofu_version: ${{ inputs.version }}
         tofu_wrapper: false
 
+    - name: Parse steps
+      id: parse-steps
+      shell: bash
+      run: |
+        STEPS_INPUT="${{ inputs.steps }}"
+        if [ -z "$STEPS_INPUT" ]; then
+          STEPS_INPUT="all"
+        fi
+
+        NORMALISED=$(echo "$STEPS_INPUT" | tr '\n,' ' ' | tr -s ' ' | xargs)
+
+        RUN_VALIDATE=false
+        RUN_PLAN=false
+        RUN_APPLY=false
+
+        if [ -z "$NORMALISED" ] || [ "$NORMALISED" = "all" ] || [[ " $NORMALISED " == *" all "* ]]; then
+          RUN_VALIDATE=true
+          RUN_PLAN=true
+          RUN_APPLY=true
+        else
+          PADDED=" $NORMALISED "
+          if [[ "$PADDED" == *" validate "* ]]; then
+            RUN_VALIDATE=true
+          fi
+          if [[ "$PADDED" == *" plan "* ]]; then
+            RUN_PLAN=true
+          fi
+          if [[ "$PADDED" == *" apply "* ]]; then
+            RUN_APPLY=true
+          fi
+        fi
+
+        echo "run_validate=$RUN_VALIDATE" >> $GITHUB_OUTPUT
+        echo "run_plan=$RUN_PLAN" >> $GITHUB_OUTPUT
+        echo "run_apply=$RUN_APPLY" >> $GITHUB_OUTPUT
+
+    - name: Parse CLI args
+      id: parse-cli-args
+      shell: bash
+      run: |
+        LOCK_TIMEOUT="${{ inputs['lock-timeout'] }}"
+        PARALLELISM="${{ inputs.parallelism }}"
+        REFRESH="${{ inputs.refresh }}"
+        TARGETS="${{ inputs.targets }}"
+        COMMON_ARGS=""
+        PLAN_ARGS=""
+        APPLY_ARGS=""
+
+        if [ -n "$LOCK_TIMEOUT" ]; then
+          COMMON_ARGS="$COMMON_ARGS -lock-timeout=$LOCK_TIMEOUT"
+        fi
+
+        if [ -n "$PARALLELISM" ]; then
+          COMMON_ARGS="$COMMON_ARGS -parallelism=$PARALLELISM"
+        fi
+
+        if [ -n "$REFRESH" ]; then
+          case "$REFRESH" in
+            true|false)
+              PLAN_ARGS="$PLAN_ARGS -refresh=$REFRESH"
+              ;;
+            *)
+              echo "Error: refresh must be 'true' or 'false'"
+              exit 1
+              ;;
+          esac
+        fi
+
+        if [ -n "$TARGETS" ]; then
+          NORMALISED_TARGETS=$(echo "$TARGETS" | tr '\n,' ' ' | tr -s ' ')
+          for target in $NORMALISED_TARGETS; do
+            target=$(echo "$target" | xargs)
+            if [ -n "$target" ]; then
+              PLAN_ARGS="$PLAN_ARGS -target=$target"
+            fi
+          done
+        fi
+
+        COMMON_ARGS=$(echo "$COMMON_ARGS" | sed 's/^ *//')
+        PLAN_ARGS=$(echo "$PLAN_ARGS" | sed 's/^ *//')
+
+        if [ -n "$COMMON_ARGS" ]; then
+          APPLY_ARGS="$COMMON_ARGS"
+          if [ -n "$PLAN_ARGS" ]; then
+            PLAN_ARGS="$COMMON_ARGS $PLAN_ARGS"
+          else
+            PLAN_ARGS="$COMMON_ARGS"
+          fi
+        fi
+
+        PLAN_ARGS=$(echo "$PLAN_ARGS" | sed 's/^ *//')
+        APPLY_ARGS=$(echo "$APPLY_ARGS" | sed 's/^ *//')
+
+        echo "plan_args=$PLAN_ARGS" >> $GITHUB_OUTPUT
+        echo "apply_args=$APPLY_ARGS" >> $GITHUB_OUTPUT
+
+    - name: Parse artifact retention
+      id: parse-retention
+      shell: bash
+      run: |
+        RETENTION_DAYS="${{ inputs['artifact-retention-days'] }}"
+        if [ -n "$RETENTION_DAYS" ]; then
+          if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
+            echo "Error: artifact-retention-days must be a number"
+            exit 1
+          fi
+          if [ "$RETENTION_DAYS" -lt 1 ] || [ "$RETENTION_DAYS" -gt 90 ]; then
+            echo "Error: artifact-retention-days must be between 1 and 90"
+            exit 1
+          fi
+          echo "retention_days=$RETENTION_DAYS" >> $GITHUB_OUTPUT
+        fi
+
     - name: Parse backend config files
       id: parse-backend-config-files
       shell: bash
       working-directory: ${{ inputs.workdir }}
       run: |
-        BACKEND_CONFIG_FILES="${{ inputs.backend-config-var-files }}"
+        BACKEND_CONFIG_FILES="${{ inputs['backend-config-var-files'] }}"
         BACKEND_CONFIG_ARGS=""
 
         if [ -n "$BACKEND_CONFIG_FILES" ]; then
@@ -87,7 +236,7 @@ runs:
       id: parse-backend-config-vars
       shell: bash
       run: |
-        BACKEND_CONFIG_VARS="${{ inputs.backend-config-vars }}"
+        BACKEND_CONFIG_VARS="${{ inputs['backend-config-vars'] }}"
         BACKEND_CONFIG_ARGS=""
 
         if [ -n "$BACKEND_CONFIG_VARS" ]; then
@@ -131,7 +280,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.workdir }}
       run: |
-        TFVAR_FILES="${{ inputs.tfvar-files }}"
+        TFVAR_FILES="${{ inputs['tfvar-files'] }}"
         TFVAR_ARGS=""
 
         if [ -n "$TFVAR_FILES" ]; then
@@ -197,7 +346,7 @@ runs:
 
     - name: Validate
       id: validate
-      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'validate') }}
+      if: ${{ steps.parse-steps.outputs.run_validate == 'true' }}
       shell: bash
       working-directory: ${{ inputs.workdir }}
       run: |
@@ -209,6 +358,19 @@ runs:
         set -e
 
         CURRENT_BRANCH=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}
+        SOURCE_REPO="$GITHUB_REPOSITORY"
+        SOURCE_REF="$CURRENT_BRANCH"
+
+        if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ -f "$GITHUB_EVENT_PATH" ]; then
+          PR_REPO=$(jq -r '.pull_request.head.repo.full_name // empty' "$GITHUB_EVENT_PATH")
+          PR_REF=$(jq -r '.pull_request.head.ref // empty' "$GITHUB_EVENT_PATH")
+          if [ -n "$PR_REPO" ]; then
+            SOURCE_REPO="$PR_REPO"
+          fi
+          if [ -n "$PR_REF" ]; then
+            SOURCE_REF="$PR_REF"
+          fi
+        fi
 
         VALIDATION_SUMMARY="| Check | Status | Details |
         |-------|--------|---------|
@@ -217,7 +379,7 @@ runs:
 
         HAS_FAILURES=false
 
-        if [ -n $FMT_SUMMARY ]; then
+        if [ -z "$FMT_SUMMARY" ]; then
           echo "fmt_failed=false" >> $GITHUB_OUTPUT
           VALIDATION_SUMMARY+="| 🎯 Format | ✅ Pass | All files are properly formatted |
           "
@@ -227,7 +389,7 @@ runs:
           HAS_FAILURES=true
 
           # Output fmt summary
-          echo "fmt_summary=$FMT_SUMMARY" >> $GITHUB_OUTPUT
+          printf 'fmt_summary=%s\n' "$FMT_SUMMARY" >> "$GITHUB_OUTPUT"
 
           VALIDATION_SUMMARY+="| 🎯 Format | ❌ Fail | \`$FMT_SUMMARY\` |
           "
@@ -282,22 +444,28 @@ runs:
           ')
 
           # Generate detailed validate output
-          VALIDATE_DETAILED=$(echo "$VALIDATE_JSON" | jq -r --arg branch "$CURRENT_BRANCH" --arg workdir "${{ inputs.workdir }}" '
+          VALIDATE_DETAILED=$(echo "$VALIDATE_JSON" | jq -r --arg repo "$SOURCE_REPO" --arg ref "$SOURCE_REF" --arg workdir "${{ inputs.workdir }}" '
             .diagnostics[] |
             "**" + (.severity[0:1] | ascii_upcase) + .severity[1:] + ":** " + .summary + "\n" +
             "**Detail:** " + .detail + "\n" +
             (if .address then "**Resource:** `" + .address + "`\n" else "" end) +
-            "**File:** `" + .range.filename + "` (Line " + (.range.start.line | tostring) + ", Column " + (.range.start.column | tostring) + ")\n" +
             (
-              if env.GITHUB_SERVER_URL and env.GITHUB_REPOSITORY then
+              if (.range? and .range.filename?) then
+                "**File:** `" + .range.filename + "` (Line " + ((.range.start.line // 0) | tostring) + ", Column " + ((.range.start.column // 0) | tostring) + ")\n"
+              else
+                "**File:** `unknown`\n"
+              end
+            ) +
+            (
+              if env.GITHUB_SERVER_URL and ($repo | length) > 0 and ($ref | length) > 0 and (.range? and .range.filename?) then
                 " 📍 [View in file](" +
                 env.GITHUB_SERVER_URL + "/" +
-                env.GITHUB_REPOSITORY + "/blob/" +
-                $branch + "/" +
+                $repo + "/blob/" +
+                $ref + "/" +
                 $workdir + "/" +
                 .range.filename + "#L" +
-                (.range.start.line | tostring) + "-L" +
-                (.range.end.line | tostring) + ")\n"
+                ((.range.start.line // 0) | tostring) + "-L" +
+                ((.range.end.line // 0) | tostring) + ")\n"
               else "" end
             ) +
             "# \n"
@@ -330,7 +498,7 @@ runs:
 
 
     - name: Validate Comment
-      if: ${{ github.event_name == 'pull_request' && (inputs.steps == 'all' || contains(inputs.steps, 'validate')) }}
+      if: ${{ github.event_name == 'pull_request' && steps.parse-steps.outputs.run_validate == 'true' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' }}
       uses: actions/github-script@v6
       with:
         script: |
@@ -339,7 +507,11 @@ runs:
             repo: context.repo.repo,
             issue_number: context.issue.number,
           })
-          const planComment = comments.find(comment => {
+          const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
+          const commentMarker = `<!-- ${commentIdentifier}:validate -->`;
+          const validationComment = comments.find(comment => {
+            return comment.body && comment.body.includes(commentMarker)
+          }) || comments.find(comment => {
             return comment.user.type === 'Bot' && comment.body.includes('TF Validate Results')
           })
           const hasFailures = ${{ steps.validate.outputs.has_failures }};
@@ -362,7 +534,8 @@ runs:
             tableRows.push(`| 🔍 Validate | ✅ Pass | Configuration is valid |`);
           }
 
-          let validationResults = `### 🧪 TF Validate Results
+          let validationResults = `${commentMarker}
+          ### 🧪 TF Validate Results
           | Check | Status | Details |
           |-------|--------|---------|
           ${tableRows.join('\n')}`;
@@ -373,11 +546,11 @@ runs:
             validationResults += `\n\nAll checks **passed!** 🎉`;
           }
 
-          if (planComment) {
+          if (validationComment) {
             github.rest.issues.updateComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              comment_id: planComment.id,
+              comment_id: validationComment.id,
               body: validationResults
             })
           } else {
@@ -390,7 +563,7 @@ runs:
           }
 
     - name: Check for validation failures
-      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'validate') }}
+      if: ${{ steps.parse-steps.outputs.run_validate == 'true' }}
       shell: bash
       run: |
         FAILURES=0
@@ -413,14 +586,34 @@ runs:
 
     - name: Plan
       id: plan
-      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'plan') }}
+      if: ${{ steps.parse-steps.outputs.run_plan == 'true' }}
       working-directory: ${{ inputs.workdir }}
       env:
         PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
       shell: bash
       run: |
-        tofu plan ${{ steps.parse-tfvar-files.outputs.tfvar-file-args }} ${{ steps.parse-tfvars.outputs.tfvar-args }} -input=false -out $PLAN_NAME.tfplan
-        PLAN=$(tofu show -no-color $PLAN_NAME.tfplan)
+        PLAN_ARGS="${{ steps.parse-cli-args.outputs.plan_args }}"
+        SUMMARY_MODE="${{ inputs['summary-mode'] }}"
+
+        if [ -z "$SUMMARY_MODE" ]; then
+          SUMMARY_MODE="full"
+        fi
+
+        case "$SUMMARY_MODE" in
+          full|redacted|off)
+            ;;
+          *)
+            echo "Error: summary-mode must be full, redacted, or off"
+            exit 1
+            ;;
+        esac
+
+        tofu plan ${{ steps.parse-tfvar-files.outputs.tfvar-file-args }} ${{ steps.parse-tfvars.outputs.tfvar-args }} $PLAN_ARGS -input=false -out $PLAN_NAME.tfplan
+
+        PLAN=""
+        if [ "$SUMMARY_MODE" = "full" ]; then
+          PLAN=$(tofu show -no-color $PLAN_NAME.tfplan)
+        fi
         PLAN_JSON=$(tofu show -json $PLAN_NAME.tfplan)
         gzip -9 $PLAN_NAME.tfplan
 
@@ -436,7 +629,8 @@ runs:
           CHANGES=false
         fi
 
-        cat >> $GITHUB_STEP_SUMMARY << PLAN_EOF
+        if [ "$SUMMARY_MODE" != "off" ]; then
+          cat << PLAN_EOF >> "$GITHUB_STEP_SUMMARY"
         ## 🏗️ Plan
 
         | Action | Count |
@@ -445,12 +639,21 @@ runs:
         | 🔄 Update | $UPDATE_COUNT |
         | ❌ Destroy | $DESTROY_COUNT |
 
+        PLAN_EOF
+
+          if [ "$SUMMARY_MODE" = "full" ]; then
+            cat << PLAN_DETAIL_EOF >> "$GITHUB_STEP_SUMMARY"
         \`\`\`hcl
         $PLAN
         \`\`\`
         ---
 
-        PLAN_EOF
+        PLAN_DETAIL_EOF
+          elif [ "$SUMMARY_MODE" = "redacted" ]; then
+            cat << PLAN_DETAIL_EOF >> "$GITHUB_STEP_SUMMARY"
+        PLAN_DETAIL_EOF
+          fi
+        fi
 
         # Output has_changes boolean
         echo "has_changes=$CHANGES" >> $GITHUB_OUTPUT
@@ -463,7 +666,7 @@ runs:
         echo "::notice::$PLAN_NAME.tfplan created"
 
     - name: PR Plan Comment
-      if: ${{ github.event_name == 'pull_request' && (inputs.steps == 'all' || contains(inputs.steps, 'plan')) }}
+      if: ${{ github.event_name == 'pull_request' && steps.parse-steps.outputs.run_plan == 'true' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' }}
       uses: actions/github-script@v6
       with:
         script: |
@@ -472,10 +675,15 @@ runs:
             repo: context.repo.repo,
             issue_number: context.issue.number,
           })
+          const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
+          const commentMarker = `<!-- ${commentIdentifier}:plan -->`;
           const planComment = comments.find(comment => {
+            return comment.body && comment.body.includes(commentMarker)
+          }) || comments.find(comment => {
             return comment.user.type === 'Bot' && comment.body.includes('TF Plan Summary')
           })
           const hasChanges = ${{ steps.plan.outputs.has_changes }};
+          const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
           const summaryTable = `
           | Action | Count |
@@ -488,13 +696,16 @@ runs:
           let plan = '';
 
           if (hasChanges) {
-            plan = `### 🏗️ TF Plan Summary
+            plan = `${commentMarker}
+            ### 🏗️ TF Plan Summary
             ${summaryTable}
-
-            Full plan can be found in the [Plan Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             `;
+            if (summaryMode === 'full') {
+              plan += `\nFull plan can be found in the [Plan Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+            }
           } else {
-            plan = `#### 🏗️ TF Plan Summary
+            plan = `${commentMarker}
+            #### 🏗️ TF Plan Summary
             ${summaryTable}
 
             \`\`\`hcl
@@ -519,8 +730,7 @@ runs:
           }
 
     - name: Upload Plan
-      id: upload-plan
-      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'plan') }}
+      if: ${{ steps.parse-steps.outputs.run_plan == 'true' && inputs['skip-plan-upload'] != 'true' && steps.parse-retention.outputs.retention_days == '' }}
       env:
         PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
       uses: actions/upload-artifact@v4
@@ -528,8 +738,20 @@ runs:
         name: ${{ env.PLAN_NAME }}
         path: ${{ inputs.workdir }}/${{ env.PLAN_NAME }}.tfplan.gz
 
+    - name: Upload Plan (retention)
+      if: ${{ steps.parse-steps.outputs.run_plan == 'true' && inputs['skip-plan-upload'] != 'true' && steps.parse-retention.outputs.retention_days != '' }}
+      env:
+        PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.PLAN_NAME }}
+        path: ${{ inputs.workdir }}/${{ env.PLAN_NAME }}.tfplan.gz
+        retention-days: ${{ steps.parse-retention.outputs.retention_days }}
+
     - name: Download Plan
-      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'apply') }}
+      id: download-plan
+      if: ${{ steps.parse-steps.outputs.run_apply == 'true' && steps.parse-steps.outputs.run_plan != 'true' }}
+      continue-on-error: true
       env:
         PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
       uses: actions/download-artifact@v4
@@ -537,49 +759,104 @@ runs:
         name: ${{ env.PLAN_NAME }}
         path: ${{ inputs.workdir }}
 
-    - name: Apply
-      id: apply
-      if: ${{ inputs.steps == 'all' || contains(inputs.steps, 'apply') }}
+    - name: Ensure plan artifact exists
+      if: ${{ steps.parse-steps.outputs.run_apply == 'true' }}
       working-directory: ${{ inputs.workdir }}
       env:
         PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
       shell: bash
       run: |
-        gunzip $PLAN_NAME.tfplan.gz
-        tofu apply -input=false -auto-approve -json -concise $PLAN_NAME.tfplan 2>&1 | tee apply_output.json
-        APPLY_OUTPUT=$(cat apply_output.json)
+        if [ ! -f "$PLAN_NAME.tfplan.gz" ]; then
+          echo "::error::Plan artifact $PLAN_NAME.tfplan.gz not found. Run the plan step before apply."
+          exit 1
+        fi
 
-        # Get the final change summary
-        APPLY_SUMMARY=$(echo $APPLY_OUTPUT | jq -r '
-        select(.type == "change_summary" and .changes.operation == "apply") |
-        "ADDED=\(.changes.add);CHANGED=\(.changes.change);DESTROYED=\(.changes.remove);IMPORTED=\(.changes.import // 0);FORGOTTEN=\(.changes.forget // 0)"
-        ' | tail -1)
+    - name: Apply
+      id: apply
+      if: ${{ steps.parse-steps.outputs.run_apply == 'true' }}
+      working-directory: ${{ inputs.workdir }}
+      env:
+        PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
+      shell: bash
+      run: |
+        APPLY_ARGS="${{ steps.parse-cli-args.outputs.apply_args }}"
+        SUMMARY_MODE="${{ inputs['summary-mode'] }}"
 
-        # Extract individual counts
-        eval $APPLY_SUMMARY
+        if [ -z "$SUMMARY_MODE" ]; then
+          SUMMARY_MODE="full"
+        fi
 
-        RESOURCE_CHANGES=$(echo $APPLY_OUTPUT | jq -r '
-          select(.type == "apply_complete") |
-          .hook.action as $action |
-          .hook.resource.resource_type + .hook.resource.resource_name as $resource |
-          "." + $resource + " (" +
-          (if $action == "create" then "created"
-          elif $action == "update" then "updated"
-          elif $action == "delete" then "destroyed"
-          else $action end) + ")"
-        ')
+        case "$SUMMARY_MODE" in
+          full|redacted|off)
+            ;;
+          *)
+            echo "Error: summary-mode must be full, redacted, or off"
+            exit 1
+            ;;
+        esac
 
-        # Get any outputs
-        OUTPUTS=$(echo $APPLY_OUTPUT | jq -r '
-          select(.type == "outputs") |
-          if (.outputs | length) > 0 then
-            .outputs | to_entries[] | "- **\(.key)**: \(.value.value)"
-          else
-            "No outputs"
-          end
-        ')
+        gunzip "$PLAN_NAME.tfplan.gz"
+        tofu apply -input=false -auto-approve -json -concise $APPLY_ARGS "$PLAN_NAME.tfplan" 2>&1 | tee apply_output.json
 
-        cat >> $GITHUB_STEP_SUMMARY << APPLY_EOF
+        ADDED=0
+        CHANGED=0
+        DESTROYED=0
+        IMPORTED=0
+        FORGOTTEN=0
+
+        # Get the final change summary if present
+        APPLY_SUMMARY=$(jq -r '
+          select(.type == "change_summary") |
+          "ADDED=\(.changes.add // 0);CHANGED=\(.changes.change // 0);DESTROYED=\(.changes.remove // 0);IMPORTED=\(.changes.import // 0);FORGOTTEN=\(.changes.forget // 0)"
+        ' apply_output.json | tail -1)
+
+        if [ -n "$APPLY_SUMMARY" ]; then
+          eval "$APPLY_SUMMARY"
+        fi
+
+        RESOURCE_CHANGES="Details redacted."
+        OUTPUTS="Outputs redacted."
+
+        if [ "$SUMMARY_MODE" = "full" ]; then
+          RESOURCE_CHANGES=$(jq -r '
+            select(.hook? and .hook.resource?) |
+            .hook.action as $action |
+            .hook.resource.resource_type + "." + .hook.resource.resource_name as $resource |
+            $resource + " (" +
+            (if $action == "create" then "created"
+            elif $action == "update" then "updated"
+            elif $action == "delete" then "destroyed"
+            else $action end) + ")"
+          ' apply_output.json)
+
+          if [ -z "$RESOURCE_CHANGES" ]; then
+            RESOURCE_CHANGES="No changes"
+          fi
+
+          # Get any outputs
+          OUTPUTS=$(jq -r '
+            select(.type == "outputs") |
+            if (.outputs | length) > 0 then
+              .outputs | to_entries[] | "- **\(.key)**: " +
+              (if .value.sensitive == true then
+                "<sensitive>"
+              elif (.value.value | type) == "string" then
+                .value.value
+              else
+                (.value.value | tostring)
+              end)
+            else
+              "No outputs"
+            end
+          ' apply_output.json)
+
+          if [ -z "$OUTPUTS" ]; then
+            OUTPUTS="No outputs"
+          fi
+        fi
+
+        if [ "$SUMMARY_MODE" != "off" ]; then
+          cat << APPLY_EOF >> "$GITHUB_STEP_SUMMARY"
         ## 🚀 Apply
 
         ### Summary
@@ -594,6 +871,7 @@ runs:
         ### Outputs
         ${OUTPUTS}
         APPLY_EOF
+        fi
 
         echo "added=${ADDED:-0}" >> $GITHUB_OUTPUT
         echo "changed=${CHANGED:-0}" >> $GITHUB_OUTPUT
@@ -611,7 +889,7 @@ runs:
         echo "::notice::$PLAN_NAME.tfplan applied!"
 
     - name: PR Apply Comment
-      if: ${{ github.event_name == 'pull_request' && (inputs.steps == 'all' || contains(inputs.steps, 'apply')) }}
+      if: ${{ github.event_name == 'pull_request' && steps.parse-steps.outputs.run_apply == 'true' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' }}
       uses: actions/github-script@v6
       with:
         script: |
@@ -620,9 +898,14 @@ runs:
             repo: context.repo.repo,
             issue_number: context.issue.number,
           })
+          const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
+          const commentMarker = `<!-- ${commentIdentifier}:apply -->`;
           const applyComment = comments.find(comment => {
+            return comment.body && comment.body.includes(commentMarker)
+          }) || comments.find(comment => {
             return comment.user.type === 'Bot' && comment.body.includes('TF Apply Summary')
           })
+          const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
           const added = ${{ steps.apply.outputs.added }};
           const changed = ${{ steps.apply.outputs.changed }};
@@ -630,12 +913,15 @@ runs:
           const imported = ${{ steps.apply.outputs.imported }};
           const forgotten = ${{ steps.apply.outputs.forgotten }};
 
-          let applySummary = `### 🚀 TF Apply Summary
+          let applySummary = `${commentMarker}
+          ### 🚀 TF Apply Summary
           **Resources:** ${added} added, ${changed} changed, ${destroyed} destroyed
           ${imported > 0 ? `**Imported:** ${imported}` : ''}
           ${forgotten > 0 ? `**Forgotten:** ${forgotten}` : ''}
-
-          Full apply output can be found in the [Apply Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+          `;
+          if (summaryMode === 'full') {
+            applySummary += `\nFull apply output can be found in the [Apply Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+          }
 
           if (applyComment) {
             github.rest.issues.updateComment({

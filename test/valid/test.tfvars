@@ -1,2 +1,2 @@
-environment = "test"
-region      = "us-east-1"
+env    = "test"
+region = "us-east-1"

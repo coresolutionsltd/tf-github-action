@@ -5,6 +5,7 @@
 * [Description](#description)
 * [Inputs](#inputs)
 * [Usage](#usage)
+* [Permissions](#permissions)
 * [Usage Examples](#usage-examples)
   * [Basic Usage](#basic-usage)
     * [Validate Only](#validate-only)
@@ -19,6 +20,7 @@
     * [Inline Backend Configuration](#inline-backend-configuration)
   * [Approval Gates](#approval-gates)
     * [Separate Plan and Apply Jobs](#separate-plan-and-apply-jobs)
+  * [Comment and Summary Controls](#comment-and-summary-controls)
 * [Contributing](#contributing)
   * [Guidelines](#guidelines)
   * [Contribution Workflow](#contribution-workflow)
@@ -40,7 +42,7 @@ Workflow summaries are automatically updated from the different stages, this mak
 
 | name | description | required | default |
 | --- | --- | --- | --- |
-| `version` | <p>The OpenTofu version to install (e.g., 1.10.x).</p> | `false` | `1.10.x` |
+| `version` | <p>The OpenTofu version to install (e.g., 1.11.x).</p> | `false` | `1.11.x` |
 | `workdir` | <p>Path to the TF configuration directory (relative to repository root).</p> | `false` | `.` |
 | `env` | <p>Deployment environment (eg <code>dev</code>, <code>staging</code> or <code>prod</code>). Accepts any string.</p> | `false` | `""` |
 | `steps` | <p>Steps to run: <code>validate</code>, <code>plan</code>, <code>apply</code> (comma, space or newline separated). Use `all`` to run all steps.</p> | `false` | `all` |
@@ -48,6 +50,15 @@ Workflow summaries are automatically updated from the different stages, this mak
 | `tfvars` | <p>Comma, space or newline separated key-value pairs for terraform variables (format: key1=value1)</p> | `false` | `""` |
 | `backend-config-var-files` | <p>Comma, space or newline  separated list of backend config files to include</p> | `false` | `""` |
 | `backend-config-vars` | <p>Comma, space or newline separated key-value pairs for backend configuration (format: key1=value1)</p> | `false` | `""` |
+| `lock-timeout` | <p>State lock timeout for plan/apply (e.g., 5m)</p> | `false` | `""` |
+| `parallelism` | <p>Parallelism for plan/apply</p> | `false` | `""` |
+| `refresh` | <p>Refresh behavior for plan/apply (<code>true</code> or <code>false</code>)</p> | `false` | `""` |
+| `targets` | <p>Comma, space or newline separated list of target resources for plan/apply</p> | `false` | `""` |
+| `artifact-retention-days` | <p>Retention days for plan artifacts (1-90). Leave empty to use repository default</p> | `false` | `""` |
+| `skip-plan-upload` | <p>Skip uploading the plan artifact</p> | `false` | `false` |
+| `summary-mode` | <p>Plan/apply summary mode: <code>full</code>, <code>redacted</code>, or <code>off</code></p> | `false` | `full` |
+| `comment-mode` | <p>PR comment mode: <code>sticky</code> to update a single comment or <code>off</code> to disable comments</p> | `false` | `sticky` |
+| `comment-identifier` | <p>Identifier used to find/update sticky PR comments</p> | `false` | `tf-github-action` |
 <!-- action-docs-inputs source="action.yml" -->
 
 <!-- action-docs-outputs source="action.yml" -->
@@ -61,10 +72,10 @@ Workflow summaries are automatically updated from the different stages, this mak
 - uses: coresolutionsltd/tf-github-action@main
   with:
     version:
-    # The OpenTofu version to install (e.g., 1.10.x).
+    # The OpenTofu version to install (e.g., 1.11.x).
     #
     # Required: false
-    # Default: 1.10.x
+    # Default: 1.11.x
 
     workdir:
     # Path to the TF configuration directory (relative to repository root).
@@ -107,8 +118,85 @@ Workflow summaries are automatically updated from the different stages, this mak
     #
     # Required: false
     # Default: ""
+
+    lock-timeout:
+    # State lock timeout for plan/apply (e.g., 5m)
+    #
+    # Required: false
+    # Default: ""
+
+    parallelism:
+    # Parallelism for plan/apply
+    #
+    # Required: false
+    # Default: ""
+
+    refresh:
+    # Refresh behavior for plan/apply (`true` or `false`)
+    #
+    # Required: false
+    # Default: ""
+
+    targets:
+    # Comma, space or newline separated list of target resources for plan/apply
+    #
+    # Required: false
+    # Default: ""
+
+    artifact-retention-days:
+    # Retention days for plan artifacts (1-90). Leave empty to use repository default
+    #
+    # Required: false
+    # Default: ""
+
+    skip-plan-upload:
+    # Skip uploading the plan artifact
+    #
+    # Required: false
+    # Default: false
+
+    summary-mode:
+    # Plan/apply summary mode: `full`, `redacted`, or `off`
+    #
+    # Required: false
+    # Default: full
+
+    comment-mode:
+    # PR comment mode: `sticky` to update a single comment or `off` to disable comments
+    #
+    # Required: false
+    # Default: sticky
+
+    comment-identifier:
+    # Identifier used to find/update sticky PR comments
+    #
+    # Required: false
+    # Default: tf-github-action
 ```
 <!-- action-docs-usage action="action.yml" project="coresolutionsltd/tf-github-action" version="main" -->
+
+## Permissions
+
+The action can post PR comments and publish releases. Ensure your workflow grants the required permissions.
+
+For PR comments:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
+
+For semantic-release publishing:
+
+```yaml
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+```
+
+For supply-chain hardening, consider pinning third-party actions to commit SHAs.
 
 ## Usage Examples
 
@@ -318,6 +406,26 @@ jobs:
           env: prod  # env must match what is planned
           steps: apply  # Only apply, plan artifact is downloaded automatically
 ```
+
+> [!NOTE]
+> Apply-only runs require a plan artifact from a previous job or run. Leave `skip-plan-upload` as `false` when you intend to apply later.
+
+### Comment and Summary Controls
+
+Control PR comments and redact plan/apply output in summaries.
+
+```yaml
+- name: Plan with redacted summaries and no PR comment
+  uses: coresolutionsltd/tf-github-action@main
+  with:
+    workdir: ./infra
+    steps: plan
+    summary-mode: redacted
+    comment-mode: off
+    artifact-retention-days: 7
+```
+
+Use `comment-identifier` if you want separate sticky comments per workflow or environment.
 
 These examples are meant to give you the building blocks for putting together a complete infrastructure deployment workflow. You can mix and match them to create pipelines that validate, plan, and apply your configuration, while also adding steps for review and approval where it makes sense.
 
