@@ -66,7 +66,6 @@ jobs:
           env: ${{ matrix.test-case.env }}
           steps: validate,plan,apply
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify action succeeded
         run: |
@@ -106,7 +105,6 @@ jobs:
           backend-config-var-files: ${{ matrix.test-case.backend-config-var-files }}
           steps: validate
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify action failed as expected
         run: |
@@ -131,7 +129,6 @@ jobs:
           env: apply-artifact
           steps: plan
           comment-mode: off
-          summary-mode: redacted
 
   apply-only-with-plan:
     name: Apply Only Using Existing Plan Artifact
@@ -149,7 +146,6 @@ jobs:
           env: apply-artifact
           steps: apply
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify apply succeeded
         run: |
@@ -176,7 +172,6 @@ jobs:
           env: missing-plan
           steps: apply
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify apply failed as expected
         run: |
@@ -201,7 +196,6 @@ jobs:
           workdir: test/empty
           steps: validate
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify validate succeeded
         run: |
@@ -235,6 +229,52 @@ jobs:
           comment-mode: off
           skip-plan-upload: true
 
+  tflint:
+    name: TFLint (${{ matrix.case.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - name: "Valid"
+            workdir: "test/valid"
+            expect_failure: false
+          - name: "Invalid"
+            workdir: "test/invalid"
+            expect_failure: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run TFLint (${{ matrix.case.name }})
+        id: tf-action-tflint
+        continue-on-error: ${{ matrix.case.expect_failure }}
+        uses: ./
+        with:
+          workdir: ${{ matrix.case.workdir }}
+          steps: lint
+          comment-mode: ${{ matrix.case.expect_failure && 'off' || 'sticky' }}
+          summary-mode: full
+          skip-plan-upload: true
+
+      - name: Verify TFLint result
+        run: |
+          if [ "${{ matrix.case.expect_failure }}" == "true" ]; then
+            if [ "${{ steps.tf-action-tflint.outcome }}" == "success" ]; then
+              echo "❌ Expected TFLint to fail for ${{ matrix.case.name }}"
+              exit 1
+            else
+              echo "✅ TFLint failed as expected for ${{ matrix.case.name }}"
+            fi
+          else
+            if [ "${{ steps.tf-action-tflint.outcome }}" != "success" ]; then
+              echo "❌ Expected TFLint to pass for ${{ matrix.case.name }}"
+              exit 1
+            else
+              echo "✅ TFLint passed for ${{ matrix.case.name }}"
+            fi
+          fi
+
   tofu-test-unit:
     name: OpenTofu Test (Unit)
     runs-on: ubuntu-latest
@@ -248,9 +288,6 @@ jobs:
           workdir: test/valid
           steps: test
           test-dir: tests/unit
-          comment-mode: sticky
-          comment-identifier: tf-github-action
-          summary-mode: redacted
           skip-plan-upload: true
 
   tofu-test-integration:
@@ -266,9 +303,6 @@ jobs:
           workdir: test/valid
           steps: test
           test-dir: tests/integration
-          comment-mode: sticky
-          comment-identifier: tf-github-action
-          summary-mode: redacted
           skip-plan-upload: true
 
   pr-comment-smoke:
@@ -285,7 +319,5 @@ jobs:
           workdir: test/valid
           env: pr-comment
           steps: validate,plan,apply
-          comment-mode: sticky
-          comment-identifier: tf-github-action
           summary-mode: redacted
           skip-plan-upload: true

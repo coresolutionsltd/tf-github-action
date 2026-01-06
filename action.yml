@@ -1,4 +1,4 @@
-name: TF GitHub Action
+name: Tofu GitHub Action
 description: This action will validate, plan and apply your OpenTofu configuration.
 
 branding:
@@ -11,7 +11,7 @@ inputs:
     required: false
     default: "1.11.x"
   workdir:
-    description: "Path to the TF configuration directory (relative to repository root)."
+    description: "Path to the Tofu configuration directory (relative to repository root)."
     required: false
     default: "."
   env:
@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ""
   steps:
-    description: 'Steps to run: `validate`, `plan`, `apply`, `test` (comma, space or newline separated). Use `all`` to run all steps.'
+    description: 'Steps to run: `validate`, `plan`, `apply`, `test`, `lint` (comma, space or newline separated). Use `all`` to run all steps.'
     required: false
     default: 'all'
   tfvar-files:
@@ -50,6 +50,10 @@ inputs:
     description: 'Comma, space or newline separated key-value pairs for test variables (defaults to tfvars)'
     required: false
     default: ''
+  tflint-version:
+    description: 'TFLint version to install'
+    required: false
+    default: 'latest'
   lock-timeout:
     description: 'State lock timeout for plan/apply (e.g., 5m)'
     required: false
@@ -75,7 +79,7 @@ inputs:
     required: false
     default: 'false'
   summary-mode:
-    description: 'Plan/apply summary mode: `full`, `redacted`, or `off`'
+    description: 'Summary mode for validate/lint/test/plan/apply: `full`, `redacted`, or `off`'
     required: false
     default: 'full'
   comment-mode:
@@ -112,12 +116,14 @@ runs:
         RUN_PLAN=false
         RUN_APPLY=false
         RUN_TEST=false
+        RUN_LINT=false
 
         if [ -z "$NORMALISED" ] || [ "$NORMALISED" = "all" ] || [[ " $NORMALISED " == *" all "* ]]; then
           RUN_VALIDATE=true
           RUN_PLAN=true
           RUN_APPLY=true
           RUN_TEST=true
+          RUN_LINT=true
         else
           PADDED=" $NORMALISED "
           if [[ "$PADDED" == *" validate "* ]]; then
@@ -132,12 +138,16 @@ runs:
           if [[ "$PADDED" == *" test "* ]]; then
             RUN_TEST=true
           fi
+          if [[ "$PADDED" == *" lint "* ]]; then
+            RUN_LINT=true
+          fi
         fi
 
         echo "run_validate=$RUN_VALIDATE" >> $GITHUB_OUTPUT
         echo "run_plan=$RUN_PLAN" >> $GITHUB_OUTPUT
         echo "run_apply=$RUN_APPLY" >> $GITHUB_OUTPUT
         echo "run_test=$RUN_TEST" >> $GITHUB_OUTPUT
+        echo "run_lint=$RUN_LINT" >> $GITHUB_OUTPUT
 
     - name: Parse CLI args
       id: parse-cli-args
@@ -447,6 +457,21 @@ runs:
       shell: bash
       working-directory: ${{ inputs.workdir }}
       run: |
+        SUMMARY_MODE="${{ inputs['summary-mode'] }}"
+
+        if [ -z "$SUMMARY_MODE" ]; then
+          SUMMARY_MODE="full"
+        fi
+
+        case "$SUMMARY_MODE" in
+          full|redacted|off)
+            ;;
+          *)
+            echo "Error: summary-mode must be full, redacted, or off"
+            exit 1
+            ;;
+        esac
+
         set +e
         FMT_DIFF=$(tofu fmt -check -diff)
         FMT_SUMMARY=$(tofu fmt -check | xargs)
@@ -478,7 +503,7 @@ runs:
 
         if [ -z "$FMT_SUMMARY" ]; then
           echo "fmt_failed=false" >> $GITHUB_OUTPUT
-          VALIDATION_SUMMARY+="| 🎯 Format | ✅ Pass | All files are properly formatted |
+          VALIDATION_SUMMARY+="| 🎯 Tofu Format | ✅ Pass | All files are properly formatted |
           "
         else
           # Output fmt failure flag
@@ -488,7 +513,7 @@ runs:
           # Output fmt summary
           printf 'fmt_summary=%s\n' "$FMT_SUMMARY" >> "$GITHUB_OUTPUT"
 
-          VALIDATION_SUMMARY+="| 🎯 Format | ❌ Fail | \`$FMT_SUMMARY\` |
+          VALIDATION_SUMMARY+="| 🎯 Tofu Format | ❌ Fail | \`$FMT_SUMMARY\` |
           "
           VALIDATION_ERRORS+="### 🎯 Format Issues
           Format validation has failed on the following files: **$FMT_SUMMARY**
@@ -507,7 +532,7 @@ runs:
 
         if [ "$IS_VALID" = "true" ]; then
           echo "validate_failed=false" >> $GITHUB_OUTPUT
-          VALIDATION_SUMMARY+="| 🔍 Validate | ✅ Pass | Configuration is valid |
+          VALIDATION_SUMMARY+="| 🔍 Tofu Validate | ✅ Pass | Configuration is valid |
           "
         else
           echo "validate_failed=true" >> $GITHUB_OUTPUT
@@ -568,7 +593,7 @@ runs:
             "# \n"
           ')
 
-          VALIDATION_SUMMARY+="| 🎯 Validate | ❌ Fail | $VALIDATE_SUMMARY |
+          VALIDATION_SUMMARY+="| 🔍 Tofu Validate | ❌ Fail | $VALIDATE_SUMMARY |
           "
 
           # Output validate summary
@@ -584,101 +609,162 @@ runs:
 
         echo "has_failures=$HAS_FAILURES" >> $GITHUB_OUTPUT
 
-        cat >> $GITHUB_STEP_SUMMARY << VALIDATION_EOF
-        ## 🧪 Validate
+        if [ "$SUMMARY_MODE" = "full" ]; then
+          {
+            printf '%s\n' "## 🧪 Tofu Validate" "" "$VALIDATION_SUMMARY" "" "$VALIDATION_ERRORS"
+          } >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$SUMMARY_MODE" = "redacted" ]; then
+          FMT_STATUS="✅ Pass"
+          FMT_DETAIL="All files are properly formatted"
+          if [ -n "$FMT_SUMMARY" ]; then
+            FMT_STATUS="❌ Fail"
+            FMT_DETAIL="\`$FMT_SUMMARY\`"
+          fi
 
-        $VALIDATION_SUMMARY
+          VALIDATE_STATUS="✅ Pass"
+          VALIDATE_DETAIL="Configuration is valid"
+          if [ "$IS_VALID" != "true" ]; then
+            VALIDATE_STATUS="❌ Fail"
+            VALIDATE_DETAIL="$VALIDATE_SUMMARY"
+          fi
 
-        $VALIDATION_ERRORS
+          REDACTED_SUMMARY=$(printf '%s\n' \
+            '| Check | Status | Details |' \
+            '|-------|--------|---------|' \
+            "| 🎯 Tofu Format | $FMT_STATUS | $FMT_DETAIL |" \
+            "| 🔍 Tofu Validate | $VALIDATE_STATUS | $VALIDATE_DETAIL |" \
+          )
+          {
+            printf '%s\n' "## 🧪 Tofu Validate" "" "$REDACTED_SUMMARY" ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
 
-        VALIDATION_EOF
 
-
-    - name: Validate Comment
-      if: ${{ github.event_name == 'pull_request' && steps.parse-steps.outputs.run_validate == 'true' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' }}
-      uses: actions/github-script@v6
+    - name: Setup TFLint
+      if: ${{ steps.parse-steps.outputs.run_lint == 'true' }}
+      uses: terraform-linters/setup-tflint@v4
       with:
-        script: |
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-          })
-          const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
-          const commentMarker = `<!-- ${commentIdentifier}:validate -->`;
-          const validationComment = comments.find(comment => {
-            return comment.body && comment.body.includes(commentMarker)
-          }) || comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes('TF Validate Results')
-          })
-          const hasFailures = ${{ steps.validate.outputs.has_failures }};
-          const fmtFailed = ${{ steps.validate.outputs.fmt_failed }};
-          const validateFailed = ${{ steps.validate.outputs.validate_failed }};
+        tflint_version: ${{ inputs['tflint-version'] }}
 
-          let tableRows = [];
-
-          // Add format row
-          if (fmtFailed) {
-            tableRows.push(`| 🎯 Format | ❌ Fail | \`${{ steps.validate.outputs.fmt_summary }}\` |`);
-          } else {
-            tableRows.push(`| 🎯 Format | ✅ Pass | All files are properly formatted |`);
-          }
-
-          // Add validate row
-          if (validateFailed) {
-            tableRows.push(`| 🔍 Validate | ❌ Fail | ${{ steps.validate.outputs.validate_summary }} |`);
-          } else {
-            tableRows.push(`| 🔍 Validate | ✅ Pass | Configuration is valid |`);
-          }
-
-          let validationResults = `${commentMarker}
-          ### 🧪 TF Validate Results
-          | Check | Status | Details |
-          |-------|--------|---------|
-          ${tableRows.join('\n')}`;
-
-          if (hasFailures) {
-            validationResults += `\n\nFailure details can be found in the [Validate Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
-          } else {
-            validationResults += `\n\nAll checks **passed!** 🎉`;
-          }
-
-          if (validationComment) {
-            github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: validationComment.id,
-              body: validationResults
-            })
-          } else {
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: validationResults
-            })
-          }
-
-    - name: Check for validation failures
-      if: ${{ steps.parse-steps.outputs.run_validate == 'true' }}
+    - name: Lint
+      id: lint
+      if: ${{ steps.parse-steps.outputs.run_lint == 'true' }}
       shell: bash
+      working-directory: ${{ inputs.workdir }}
       run: |
-        FAILURES=0
+        SUMMARY_MODE="${{ inputs['summary-mode'] }}"
 
-        if [[ "${{ steps.validate.outputs.fmt_failed }}" == "true" ]]; then
-          echo "::error::Format validation failed"
-          FAILURES=$((FAILURES + 1))
+        if [ -z "$SUMMARY_MODE" ]; then
+          SUMMARY_MODE="full"
         fi
 
-        if [[ "${{ steps.validate.outputs.validate_failed }}" == "true" ]]; then
-          echo "::error::Validation checks failed"
-          FAILURES=$((FAILURES + 1))
+        case "$SUMMARY_MODE" in
+          full|redacted|off)
+            ;;
+          *)
+            echo "Error: summary-mode must be full, redacted, or off"
+            exit 1
+            ;;
+        esac
+
+        CONFIG_ARG=""
+        if [ -f ".tflint.hcl" ]; then
+          CONFIG_ARG="--config $(pwd)/.tflint.hcl"
+        elif [ -f "$GITHUB_WORKSPACE/.tflint.hcl" ]; then
+          CONFIG_ARG="--config $GITHUB_WORKSPACE/.tflint.hcl"
         fi
 
-        if [[ $FAILURES -gt 0 ]]; then
-          exit 1
+        if ! find . -name "*.tf" -print -quit | grep -q .; then
+          echo "::warning::No Terraform/OpenTofu files found to lint in '${{ inputs.workdir }}'."
+          echo "lint_ran=false" >> $GITHUB_OUTPUT
+          echo "lint_skipped=true" >> $GITHUB_OUTPUT
+          echo "lint_failed=false" >> $GITHUB_OUTPUT
+          echo "lint_status=skipped" >> $GITHUB_OUTPUT
+          echo "lint_details=No Terraform/OpenTofu files found to lint." >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        INIT_EXIT=0
+        if [ -n "$CONFIG_ARG" ]; then
+          set +e
+          tflint $CONFIG_ARG --init
+          INIT_EXIT=$?
+          set -e
+        fi
+
+        set +e
+        tflint $CONFIG_ARG > lint_output.txt 2>&1
+        LINT_EXIT=$?
+        set -e
+
+        if [ "$INIT_EXIT" -ne 0 ]; then
+          LINT_EXIT=$INIT_EXIT
+        fi
+
+        LINT_ISSUE_COUNT=$( { grep -Eo '[0-9]+ (issue|issues)\\(s\\)? found' lint_output.txt | head -1 | awk '{print $1}'; } || true)
+        if [ -z "$LINT_ISSUE_COUNT" ] || [ "$LINT_ISSUE_COUNT" -eq 0 ]; then
+          LINT_ISSUE_COUNT=$( { grep -E '^(Warning|Error|Notice):' lint_output.txt | wc -l | tr -d ' '; } || true)
+        fi
+        if [ -z "$LINT_ISSUE_COUNT" ]; then
+          LINT_ISSUE_COUNT=0
+        fi
+
+        if [ "$LINT_EXIT" -eq 0 ]; then
+          LINT_STATUS="pass"
+          LINT_DETAILS="No issues found."
+          echo "lint_failed=false" >> $GITHUB_OUTPUT
         else
-          echo "::notice::All validation checks passed"
+          LINT_STATUS="fail"
+          LINT_DETAILS="${LINT_ISSUE_COUNT} issue(s) found."
+          echo "lint_failed=true" >> $GITHUB_OUTPUT
+        fi
+
+        echo "lint_ran=true" >> $GITHUB_OUTPUT
+        echo "lint_skipped=false" >> $GITHUB_OUTPUT
+        echo "lint_status=$LINT_STATUS" >> $GITHUB_OUTPUT
+        echo "lint_issue_count=$LINT_ISSUE_COUNT" >> $GITHUB_OUTPUT
+        printf 'lint_details=%s\n' "$LINT_DETAILS" >> "$GITHUB_OUTPUT"
+
+        if [ "$LINT_STATUS" = "pass" ]; then
+          LINT_SUMMARY_STATUS="✅ Pass"
+        else
+          LINT_SUMMARY_STATUS="❌ Fail"
+        fi
+
+        LINT_OUTPUT=""
+        if [ "$LINT_STATUS" = "fail" ]; then
+          LINT_ISSUES=$(grep -E ":[0-9]+:[0-9]+: (Warning|Error|Notice) -" lint_output.txt || true)
+          if [ -z "$LINT_ISSUES" ]; then
+            LINT_ISSUES=$(cat lint_output.txt)
+          fi
+          LINT_OUTPUT=$(printf '%s\n' \
+            "### ⚠️ Lint Issues" \
+            "TFLint reported ${LINT_ISSUE_COUNT} issue(s)." \
+            "" \
+            '```' \
+            "$LINT_ISSUES" \
+            '```' \
+          )
+        fi
+
+        if [ "$SUMMARY_MODE" = "full" ]; then
+          {
+            printf '%s\n' "## 🧹 Tofu Lint" "" \
+              "| Check | Status | Details |" \
+              "|-------|--------|---------|" \
+              "| 🧹 TFLint | $LINT_SUMMARY_STATUS | $LINT_DETAILS |" \
+              "" \
+              "$LINT_OUTPUT" \
+              ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$SUMMARY_MODE" = "redacted" ]; then
+          {
+            printf '%s\n' "## 🧹 Tofu Lint" "" \
+              "| Check | Status | Details |" \
+              "|-------|--------|---------|" \
+              "| 🧹 TFLint | $LINT_SUMMARY_STATUS | $LINT_DETAILS |" \
+              ""
+          } >> "$GITHUB_STEP_SUMMARY"
         fi
 
     - name: Test
@@ -687,7 +773,29 @@ runs:
       shell: bash
       working-directory: ${{ inputs.workdir }}
       run: |
+        SUMMARY_MODE="${{ inputs['summary-mode'] }}"
+
+        if [ -z "$SUMMARY_MODE" ]; then
+          SUMMARY_MODE="full"
+        fi
+
+        case "$SUMMARY_MODE" in
+          full|redacted|off)
+            ;;
+          *)
+            echo "Error: summary-mode must be full, redacted, or off"
+            exit 1
+            ;;
+        esac
+
         TEST_DIR="${{ inputs['test-dir'] }}"
+        TEST_DIR_LABEL=$(basename "$TEST_DIR")
+        TEST_DIR_LABEL=${TEST_DIR_LABEL//_/ }
+        TEST_DIR_LABEL=${TEST_DIR_LABEL//-/ }
+        TEST_DIR_LABEL=$(echo "$TEST_DIR_LABEL" | awk '{for (i=1; i<=NF; i++) { $i = toupper(substr($i,1,1)) substr($i,2) } print }')
+        if [ -z "$TEST_DIR_LABEL" ]; then
+          TEST_DIR_LABEL="Tests"
+        fi
         TEST_TFVAR_FILE_ARGS="${{ steps.parse-test-tfvar-files.outputs.test-tfvar-file-args }}"
         TEST_TFVAR_ARGS="${{ steps.parse-test-tfvars.outputs.test-tfvar-args }}"
 
@@ -737,17 +845,32 @@ runs:
         echo "test_skipped=false" >> $GITHUB_OUTPUT
         echo "test_status=$TEST_STATUS" >> $GITHUB_OUTPUT
 
-        cat << TEST_EOF >> "$GITHUB_STEP_SUMMARY"
-        ## 🧪 Test
+        if [ "$TEST_STATUS" = "pass" ]; then
+          TEST_SUMMARY_STATUS="✅ Pass"
+        else
+          TEST_SUMMARY_STATUS="❌ Fail"
+        fi
 
-        | Check | Status | Details |
-        |-------|--------|---------|
-        | 🧪 Tests | $(if [ "$TEST_STATUS" = "pass" ]; then echo "✅ Pass"; else echo "❌ Fail"; fi) | $TEST_DETAILS |
+        if [ "$SUMMARY_MODE" = "full" ]; then
+          {
+            printf '%s\n' "## 🧪 Tofu Test" "" \
+              "| Check | Status | Details |" \
+              "|-------|--------|---------|" \
+              "| 🧪 $TEST_DIR_LABEL | $TEST_SUMMARY_STATUS | $TEST_DETAILS |" \
+              ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$SUMMARY_MODE" = "redacted" ]; then
+          {
+            printf '%s\n' "## 🧪 Tofu Test" "" \
+              "| Check | Status | Details |" \
+              "|-------|--------|---------|" \
+              "| 🧪 $TEST_DIR_LABEL | $TEST_SUMMARY_STATUS | Details redacted |" \
+              ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
 
-        TEST_EOF
-
-    - name: Test Comment
-      if: ${{ github.event_name == 'pull_request' && steps.parse-steps.outputs.run_test == 'true' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' }}
+    - name: Checks Comment
+      if: ${{ always() && github.event_name == 'pull_request' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' && (steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_test == 'true') }}
       uses: actions/github-script@v6
       with:
         script: |
@@ -757,41 +880,16 @@ runs:
             issue_number: context.issue.number,
           })
           const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
-          const testDir = `${{ inputs['test-dir'] }}` || 'tests';
-          const commentMarker = `<!-- ${commentIdentifier}:test -->`;
-          const testComment = comments.find(comment => {
-            return comment.body && comment.body.includes(commentMarker)
-          }) || comments.find(comment => {
-            return comment.body && comment.body.includes('TF Test Results')
-          })
-
-          const testRan = ${{ steps.test.outputs.test_ran }};
-          const testSkipped = ${{ steps.test.outputs.test_skipped }};
-          const testFailed = ${{ steps.test.outputs.test_failed }};
-
-          const checkName = (testDir.split('/').filter(Boolean).pop() || 'Tests')
-            .replace(/[-_]/g, ' ')
-            .replace(/\b\w/g, c => c.toUpperCase());
-
-          let status = '⚠️ Skipped';
-          let details = `No OpenTofu tests were executed in \`${testDir}\`.`;
-
-          if (testRan) {
-            if (testFailed) {
-              status = '❌ Fail';
-              details = `OpenTofu tests failed in \`${testDir}\`.`;
-            } else {
-              status = '✅ Pass';
-              details = `All OpenTofu tests passed in \`${testDir}\`.`;
-            }
-          } else if (testSkipped) {
-            details = `No OpenTofu tests were executed in \`${testDir}\`.`;
-          }
+          const commentMarker = `<!-- ${commentIdentifier}:checks -->`;
+          const checksComments = comments.filter(comment => comment.body && comment.body.includes(commentMarker));
 
           const rows = {};
-
-          if (testComment && testComment.body) {
-            const lines = testComment.body.split('\n');
+          const parseRows = (body) => {
+            const parsed = {};
+            if (!body) {
+              return parsed;
+            }
+            const lines = body.split('\n');
             for (const line of lines) {
               if (!line.trim().startsWith('|')) {
                 continue;
@@ -804,13 +902,137 @@ runs:
               if (check === 'Check' || check === '-------') {
                 continue;
               }
-              rows[check] = { status: rowStatus, details: rowDetails };
+              parsed[check] = { status: rowStatus, details: rowDetails };
+            }
+            return parsed;
+          };
+
+          const orderedExisting = checksComments
+            .map(comment => ({
+              comment,
+              updatedAt: new Date(comment.updated_at || comment.created_at || 0).getTime(),
+            }))
+            .sort((a, b) => a.updatedAt - b.updatedAt);
+
+          for (const { comment } of orderedExisting) {
+            const parsedRows = parseRows(comment.body);
+            for (const [check, row] of Object.entries(parsedRows)) {
+              rows[check] = row;
             }
           }
 
-          rows[checkName] = { status, details };
+          const runValidate = '${{ steps.parse-steps.outputs.run_validate }}' === 'true';
+          const runLint = '${{ steps.parse-steps.outputs.run_lint }}' === 'true';
+          const runTest = '${{ steps.parse-steps.outputs.run_test }}' === 'true';
 
-          const preferredOrder = ['Unit', 'Integration'];
+          if (runValidate) {
+            const fmtFailedOutput = `${{ steps.validate.outputs.fmt_failed }}`;
+            const validateFailedOutput = `${{ steps.validate.outputs.validate_failed }}`;
+            const fmtSummary = `${{ steps.validate.outputs.fmt_summary }}`;
+            const validateSummary = `${{ steps.validate.outputs.validate_summary }}`;
+            const validateOutcome = `${{ steps.validate.outcome }}`;
+            const validateOutputsPresent = fmtFailedOutput !== '' || validateFailedOutput !== '';
+
+            if (!validateOutputsPresent && validateOutcome && validateOutcome !== 'success') {
+              rows['🎯 Tofu Format'] = {
+                status: '❌ Fail',
+                details: 'Validate step failed before reporting status.',
+              };
+              rows['🔍 Tofu Validate'] = {
+                status: '❌ Fail',
+                details: 'Validate step failed before reporting status.',
+              };
+            } else {
+              const fmtFailed = fmtFailedOutput === 'true';
+              const validateFailed = validateFailedOutput === 'true';
+
+              rows['🎯 Tofu Format'] = {
+                status: fmtFailed ? '❌ Fail' : '✅ Pass',
+                details: fmtFailed ? `\`${fmtSummary}\`` : 'All files are properly formatted',
+              };
+              rows['🔍 Tofu Validate'] = {
+                status: validateFailed ? '❌ Fail' : '✅ Pass',
+                details: validateFailed ? validateSummary : 'Configuration is valid',
+              };
+            }
+          }
+
+          if (runLint) {
+            const lintRanOutput = `${{ steps.lint.outputs.lint_ran }}`;
+            const lintSkippedOutput = `${{ steps.lint.outputs.lint_skipped }}`;
+            const lintFailedOutput = `${{ steps.lint.outputs.lint_failed }}`;
+            const lintStatusOutput = `${{ steps.lint.outputs.lint_status }}`;
+            const lintIssueCount = Number(`${{ steps.lint.outputs.lint_issue_count }}` || 0);
+            const lintDetails = `${{ steps.lint.outputs.lint_details }}`;
+            const lintOutcome = `${{ steps.lint.outcome }}`;
+            const lintOutputsPresent = lintStatusOutput !== '';
+
+            let status = '⚠️ Skipped';
+            let details = 'No Terraform/OpenTofu files to lint.';
+
+            if (!lintOutputsPresent && lintOutcome && lintOutcome !== 'success') {
+              status = '❌ Fail';
+              details = 'Lint step failed before reporting status.';
+            } else {
+              const lintRan = lintRanOutput === 'true';
+              const lintSkipped = lintSkippedOutput === 'true';
+              const lintFailed = lintFailedOutput === 'true';
+
+              if (lintRan) {
+                status = lintFailed ? '❌ Fail' : '✅ Pass';
+                details = lintFailed ? `${lintIssueCount} issue(s) found.` : 'No issues found.';
+              } else if (lintSkipped) {
+                details = lintDetails || 'No Terraform/OpenTofu files to lint.';
+              }
+            }
+
+            rows['🧹 TFLint'] = { status, details };
+          }
+
+          if (runTest) {
+            const testDir = `${{ inputs['test-dir'] }}` || 'tests';
+            const dirLabel = (testDir.split('/').filter(Boolean).pop() || 'Tests')
+              .replace(/[-_]/g, ' ')
+              .replace(/\b\w/g, c => c.toUpperCase());
+            const checkName = `🧪 Tofu Test (${dirLabel})`;
+
+            const testRanOutput = `${{ steps.test.outputs.test_ran }}`;
+            const testSkippedOutput = `${{ steps.test.outputs.test_skipped }}`;
+            const testFailedOutput = `${{ steps.test.outputs.test_failed }}`;
+            const testStatusOutput = `${{ steps.test.outputs.test_status }}`;
+            const testOutcome = `${{ steps.test.outcome }}`;
+            const testOutputsPresent = testStatusOutput !== '';
+
+            let status = '⚠️ Skipped';
+            let details = `No OpenTofu tests were executed in \`${testDir}\`.`;
+
+            if (!testOutputsPresent && testOutcome && testOutcome !== 'success') {
+              status = '❌ Fail';
+              details = `Test step failed before reporting status for \`${testDir}\`.`;
+            } else {
+              const testRan = testRanOutput === 'true';
+              const testSkipped = testSkippedOutput === 'true';
+              const testFailed = testFailedOutput === 'true';
+
+              if (testRan) {
+                status = testFailed ? '❌ Fail' : '✅ Pass';
+                details = testFailed ? `OpenTofu tests failed in \`${testDir}\`.` : `All OpenTofu tests passed in \`${testDir}\`.`;
+              } else if (testSkipped) {
+                details = `No OpenTofu tests were executed in \`${testDir}\`.`;
+              }
+            }
+
+            rows[checkName] = { status, details };
+          }
+
+          const preferredOrder = [
+            '🎯 Tofu Format',
+            '🔍 Tofu Validate',
+            '🧹 TFLint',
+            '🧪 Tofu Test (Unit)',
+            '🧪 Tofu Test (Integration)',
+          ];
+
           const orderedChecks = [
             ...preferredOrder.filter(name => rows[name]),
             ...Object.keys(rows).filter(name => !preferredOrder.includes(name)).sort(),
@@ -825,41 +1047,102 @@ runs:
             }),
           ];
 
-          let testSummary = `${commentMarker}
-          ### 🧪 TF Test Results
+          let checksSummary = `${commentMarker}
+          ### 🧪 Tofu Checks
           ${tableLines.join('\n')}`;
 
           const anyFail = Object.values(rows).some(row => row.status.includes('❌'));
           const anySkip = Object.values(rows).some(row => row.status.includes('⚠️'));
           if (!anyFail && !anySkip && Object.keys(rows).length > 0) {
-            testSummary += `\n\nAll tests passed! 🎉`;
+            checksSummary += `\n\nAll checks **passed!** 🎉`;
+          } else if (anyFail) {
+            checksSummary += `\n\nFailure details can be found in the [Workflow Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
           }
 
-          if (testComment) {
-            github.rest.issues.updateComment({
+          let primaryComment = null;
+          if (orderedExisting.length > 0) {
+            primaryComment = orderedExisting[orderedExisting.length - 1].comment;
+          }
+
+          if (primaryComment) {
+            await github.rest.issues.updateComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              comment_id: testComment.id,
-              body: testSummary
+              comment_id: primaryComment.id,
+              body: checksSummary
             })
           } else {
-            github.rest.issues.createComment({
+            const created = await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: testSummary
+              body: checksSummary
+            })
+            primaryComment = created.data;
+          }
+
+          const deletable = checksComments.filter(comment => {
+            if (!primaryComment || comment.id === primaryComment.id) {
+              return false;
+            }
+            const isBot = comment.user && comment.user.type === 'Bot';
+            return isBot || (comment.body && comment.body.includes(commentMarker));
+          });
+          for (const comment of deletable) {
+            await github.rest.issues.deleteComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: comment.id,
             })
           }
 
-    - name: Check for test failures
-      if: ${{ steps.parse-steps.outputs.run_test == 'true' }}
+    - name: Check for check failures
+      if: ${{ always() && (steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_test == 'true') }}
       shell: bash
       run: |
-        if [[ "${{ steps.test.outputs.test_failed }}" == "true" ]]; then
-          echo "::error::OpenTofu tests failed"
+        FAILURES=0
+
+        if [[ "${{ steps.parse-steps.outputs.run_validate }}" == "true" ]]; then
+          if [[ "${{ steps.validate.outcome }}" != "success" ]]; then
+            echo "::error::Validate step failed before reporting status"
+            FAILURES=$((FAILURES + 1))
+          fi
+          if [[ "${{ steps.validate.outputs.fmt_failed }}" == "true" ]]; then
+            echo "::error::Format validation failed"
+            FAILURES=$((FAILURES + 1))
+          fi
+          if [[ "${{ steps.validate.outputs.validate_failed }}" == "true" ]]; then
+            echo "::error::Validation checks failed"
+            FAILURES=$((FAILURES + 1))
+          fi
+        fi
+
+        if [[ "${{ steps.parse-steps.outputs.run_lint }}" == "true" ]]; then
+          if [[ "${{ steps.lint.outcome }}" != "success" ]]; then
+            echo "::error::Lint step failed before reporting status"
+            FAILURES=$((FAILURES + 1))
+          fi
+          if [[ "${{ steps.lint.outputs.lint_failed }}" == "true" ]]; then
+            echo "::error::TFLint checks failed"
+            FAILURES=$((FAILURES + 1))
+          fi
+        fi
+
+        if [[ "${{ steps.parse-steps.outputs.run_test }}" == "true" ]]; then
+          if [[ "${{ steps.test.outcome }}" != "success" ]]; then
+            echo "::error::Test step failed before reporting status"
+            FAILURES=$((FAILURES + 1))
+          fi
+          if [[ "${{ steps.test.outputs.test_failed }}" == "true" ]]; then
+            echo "::error::OpenTofu tests failed"
+            FAILURES=$((FAILURES + 1))
+          fi
+        fi
+
+        if [[ $FAILURES -gt 0 ]]; then
           exit 1
         else
-          echo "::notice::OpenTofu tests passed or were skipped"
+          echo "::notice::All checks passed"
         fi
 
     - name: Plan
@@ -909,7 +1192,7 @@ runs:
 
         if [ "$SUMMARY_MODE" != "off" ]; then
           cat << PLAN_EOF >> "$GITHUB_STEP_SUMMARY"
-        ## 🏗️ Plan
+        ## 🏗️ Tofu Plan
 
         | Action | Count |
         |--------|-------|
@@ -958,9 +1241,9 @@ runs:
           const planComment = comments.find(comment => {
             return comment.body && comment.body.includes(commentMarker)
           }) || comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes('TF Plan Summary')
+            return comment.user.type === 'Bot' && comment.body.includes('Tofu Plan')
           })
-          const hasChanges = ${{ steps.plan.outputs.has_changes }};
+          const hasChanges = '${{ steps.plan.outputs.has_changes }}' === 'true';
           const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
           const summaryTable = `
@@ -975,7 +1258,7 @@ runs:
 
           if (hasChanges) {
             plan = `${commentMarker}
-            ### 🏗️ TF Plan Summary
+            ### 🏗️ Tofu Plan
             ${summaryTable}
             `;
             if (summaryMode === 'full') {
@@ -983,7 +1266,7 @@ runs:
             }
           } else {
             plan = `${commentMarker}
-            #### 🏗️ TF Plan Summary
+            #### 🏗️ Tofu Plan
             ${summaryTable}
 
             \`\`\`hcl
@@ -1105,7 +1388,7 @@ runs:
             elif $action == "update" then "updated"
             elif $action == "delete" then "destroyed"
             else $action end) + ")"
-          ' apply_output.json)
+          ' apply_output.json | awk 'NF && !seen[$0]++')
 
           if [ -z "$RESOURCE_CHANGES" ]; then
             RESOURCE_CHANGES="No changes"
@@ -1135,7 +1418,7 @@ runs:
 
         if [ "$SUMMARY_MODE" != "off" ]; then
           cat << APPLY_EOF >> "$GITHUB_STEP_SUMMARY"
-        ## 🚀 Apply
+        ## 🚀 Tofu Apply
 
         ### Summary
         **Resources:** ${ADDED} added, ${CHANGED} changed, ${DESTROYED} destroyed
@@ -1181,18 +1464,18 @@ runs:
           const applyComment = comments.find(comment => {
             return comment.body && comment.body.includes(commentMarker)
           }) || comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes('TF Apply Summary')
+            return comment.user.type === 'Bot' && comment.body.includes('Tofu Apply')
           })
           const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
-          const added = ${{ steps.apply.outputs.added }};
-          const changed = ${{ steps.apply.outputs.changed }};
-          const destroyed = ${{ steps.apply.outputs.destroyed }};
-          const imported = ${{ steps.apply.outputs.imported }};
-          const forgotten = ${{ steps.apply.outputs.forgotten }};
+          const added = Number('${{ steps.apply.outputs.added }}' || 0);
+          const changed = Number('${{ steps.apply.outputs.changed }}' || 0);
+          const destroyed = Number('${{ steps.apply.outputs.destroyed }}' || 0);
+          const imported = Number('${{ steps.apply.outputs.imported }}' || 0);
+          const forgotten = Number('${{ steps.apply.outputs.forgotten }}' || 0);
 
           let applySummary = `${commentMarker}
-          ### 🚀 TF Apply Summary
+          ### 🚀 Tofu Apply
           **Resources:** ${added} added, ${changed} changed, ${destroyed} destroyed
           ${imported > 0 ? `**Imported:** ${imported}` : ''}
           ${forgotten > 0 ? `**Forgotten:** ${forgotten}` : ''}
