@@ -22,6 +22,9 @@
     * [Separate Plan and Apply Jobs](#separate-plan-and-apply-jobs)
   * [Comment and Summary Controls](#comment-and-summary-controls)
   * [Linting](#linting)
+  * [Security Scanning](#security-scanning)
+    * [Trivy](#trivy)
+    * [Checkov](#checkov)
   * [Testing](#testing)
 * [Contributing](#contributing)
   * [Guidelines](#guidelines)
@@ -47,7 +50,7 @@ Workflow summaries are automatically updated from the different stages, this mak
 | `version` | <p>The OpenTofu version to install (e.g., 1.11.x).</p> | `false` | `1.11.x` |
 | `workdir` | <p>Path to the Tofu configuration directory (relative to repository root).</p> | `false` | `.` |
 | `env` | <p>Deployment environment (eg <code>dev</code>, <code>staging</code> or <code>prod</code>). Accepts any string.</p> | `false` | `""` |
-| `steps` | <p>Steps to run: <code>validate</code>, <code>plan</code>, <code>apply</code>, <code>test</code>, <code>lint</code> (comma, space or newline separated). Use `all`` to run all steps.</p> | `false` | `all` |
+| `steps` | <p>Steps to run: <code>validate</code>, <code>plan</code>, <code>apply</code>, <code>test</code>, <code>lint</code>, <code>trivy</code>, <code>checkov</code> (comma, space or newline separated). Use `all`` to run all steps.</p> | `false` | `all` |
 | `tfvar-files` | <p>Comma, space or newline separated list of tfvar files to include</p> | `false` | `""` |
 | `tfvars` | <p>Comma, space or newline separated key-value pairs for terraform variables (format: key1=value1)</p> | `false` | `""` |
 | `backend-config-var-files` | <p>Comma, space or newline  separated list of backend config files to include</p> | `false` | `""` |
@@ -56,13 +59,18 @@ Workflow summaries are automatically updated from the different stages, this mak
 | `test-tfvar-files` | <p>Comma, space or newline separated list of tfvar files to include for tests (defaults to tfvar-files)</p> | `false` | `""` |
 | `test-tfvars` | <p>Comma, space or newline separated key-value pairs for test variables (defaults to tfvars)</p> | `false` | `""` |
 | `tflint-version` | <p>TFLint version to install</p> | `false` | `latest` |
+| `trivy-version` | <p>Trivy version to install</p> | `false` | `latest` |
+| `trivy-args` | <p>Extra Trivy CLI arguments</p> | `false` | `""` |
+| `checkov-version` | <p>Checkov version to install</p> | `false` | `latest` |
+| `checkov-args` | <p>Extra Checkov CLI arguments</p> | `false` | `""` |
+| `checkov-skip-checks` | <p>Comma, space or newline separated list of Checkov checks to skip</p> | `false` | `""` |
 | `lock-timeout` | <p>State lock timeout for plan/apply (e.g., 5m)</p> | `false` | `""` |
 | `parallelism` | <p>Parallelism for plan/apply</p> | `false` | `""` |
 | `refresh` | <p>Refresh behavior for plan/apply (<code>true</code> or <code>false</code>)</p> | `false` | `""` |
 | `targets` | <p>Comma, space or newline separated list of target resources for plan/apply</p> | `false` | `""` |
 | `artifact-retention-days` | <p>Retention days for plan artifacts (1-90). Leave empty to use repository default</p> | `false` | `""` |
 | `skip-plan-upload` | <p>Skip uploading the plan artifact</p> | `false` | `false` |
-| `summary-mode` | <p>Summary mode for validate/lint/test/plan/apply: <code>full</code>, <code>redacted</code>, or <code>off</code></p> | `false` | `full` |
+| `summary-mode` | <p>Summary mode for validate/lint/trivy/checkov/test/plan/apply: <code>full</code>, <code>redacted</code>, or <code>off</code></p> | `false` | `full` |
 | `comment-mode` | <p>PR comment mode: <code>sticky</code> to update a single comment or <code>off</code> to disable comments</p> | `false` | `sticky` |
 | `comment-identifier` | <p>Identifier used to find/update sticky PR comments</p> | `false` | `tf-github-action` |
 <!-- action-docs-inputs source="action.yml" -->
@@ -96,7 +104,7 @@ Workflow summaries are automatically updated from the different stages, this mak
     # Default: ""
 
     steps:
-    # Steps to run: `validate`, `plan`, `apply`, `test`, `lint` (comma, space or newline separated). Use `all`` to run all steps.
+    # Steps to run: `validate`, `plan`, `apply`, `test`, `lint`, `trivy`, `checkov` (comma, space or newline separated). Use `all`` to run all steps.
     #
     # Required: false
     # Default: all
@@ -149,6 +157,36 @@ Workflow summaries are automatically updated from the different stages, this mak
     # Required: false
     # Default: latest
 
+    trivy-version:
+    # Trivy version to install
+    #
+    # Required: false
+    # Default: latest
+
+    trivy-args:
+    # Extra Trivy CLI arguments
+    #
+    # Required: false
+    # Default: ""
+
+    checkov-version:
+    # Checkov version to install
+    #
+    # Required: false
+    # Default: latest
+
+    checkov-args:
+    # Extra Checkov CLI arguments
+    #
+    # Required: false
+    # Default: ""
+
+    checkov-skip-checks:
+    # Comma, space or newline separated list of Checkov checks to skip
+    #
+    # Required: false
+    # Default: ""
+
     lock-timeout:
     # State lock timeout for plan/apply (e.g., 5m)
     #
@@ -186,7 +224,7 @@ Workflow summaries are automatically updated from the different stages, this mak
     # Default: false
 
     summary-mode:
-    # Summary mode for validate/lint/test/plan/apply: `full`, `redacted`, or `off`
+    # Summary mode for validate/lint/trivy/checkov/test/plan/apply: `full`, `redacted`, or `off`
     #
     # Required: false
     # Default: full
@@ -459,7 +497,11 @@ Use `comment-identifier` if you want separate sticky comments per workflow or en
 
 ### Linting
 
-Linting runs `tflint` against `workdir`. If a `.tflint.hcl` config exists in the workdir it is used; otherwise a config in the repository root is used. When no config is present, TFLint runs with its default rules.
+Linting runs `tflint` against `workdir`. Configuration resolution is:
+
+1. `.tflint.hcl` in `workdir`
+2. `.tflint.hcl` in the repository root
+3. The default `.tflint.hcl` bundled with this action
 
 ```yaml
 - name: Lint with TFLint
@@ -467,6 +509,43 @@ Linting runs `tflint` against `workdir`. If a `.tflint.hcl` config exists in the
   with:
     workdir: ./infra
     steps: lint
+
+### Security Scanning
+
+Trivy and Checkov scans use config files with sensible defaults bundled in this action. You can override them by placing a config file in your repo.
+
+Config resolution (highest precedence first):
+
+1. `workdir` (the directory you pass to the action where your Tofu config lives)
+2. Repository root (local repo)
+3. Default config bundled with this action
+
+Use `.trivy.yaml` and `.checkov.yaml` in your repo to override the defaults.
+
+#### Trivy
+
+Trivy scans IaC configuration using `.trivy.yaml` and `steps: trivy`. Use `trivy-args` for additional CLI flags and `trivy-version` to pin the version.
+
+```yaml
+- name: Trivy scan
+  uses: coresolutionsltd/tofu-github-action@main
+  with:
+    workdir: ./infra
+    steps: trivy
+```
+
+#### Checkov
+
+Checkov scans IaC configuration using `.checkov.yaml` and `steps: checkov`. Use `checkov-skip-checks` for quick exclusions and `checkov-args` for additional CLI flags.
+
+```yaml
+- name: Checkov scan
+  uses: coresolutionsltd/tofu-github-action@main
+  with:
+    workdir: ./infra
+    steps: checkov
+    checkov-skip-checks: CKV_AWS_20,CKV_AWS_21
+```
 ```
 
 ### Testing

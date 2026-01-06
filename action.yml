@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ""
   steps:
-    description: 'Steps to run: `validate`, `plan`, `apply`, `test`, `lint` (comma, space or newline separated). Use `all`` to run all steps.'
+    description: 'Steps to run: `validate`, `plan`, `apply`, `test`, `lint`, `trivy`, `checkov` (comma, space or newline separated). Use `all`` to run all steps.'
     required: false
     default: 'all'
   tfvar-files:
@@ -54,6 +54,26 @@ inputs:
     description: 'TFLint version to install'
     required: false
     default: 'latest'
+  trivy-version:
+    description: 'Trivy version to install'
+    required: false
+    default: 'latest'
+  trivy-args:
+    description: 'Extra Trivy CLI arguments'
+    required: false
+    default: ''
+  checkov-version:
+    description: 'Checkov version to install'
+    required: false
+    default: 'latest'
+  checkov-args:
+    description: 'Extra Checkov CLI arguments'
+    required: false
+    default: ''
+  checkov-skip-checks:
+    description: 'Comma, space or newline separated list of Checkov checks to skip'
+    required: false
+    default: ''
   lock-timeout:
     description: 'State lock timeout for plan/apply (e.g., 5m)'
     required: false
@@ -79,7 +99,7 @@ inputs:
     required: false
     default: 'false'
   summary-mode:
-    description: 'Summary mode for validate/lint/test/plan/apply: `full`, `redacted`, or `off`'
+    description: 'Summary mode for validate/lint/trivy/checkov/test/plan/apply: `full`, `redacted`, or `off`'
     required: false
     default: 'full'
   comment-mode:
@@ -117,6 +137,8 @@ runs:
         RUN_APPLY=false
         RUN_TEST=false
         RUN_LINT=false
+        RUN_TRIVY=false
+        RUN_CHECKOV=false
 
         if [ -z "$NORMALISED" ] || [ "$NORMALISED" = "all" ] || [[ " $NORMALISED " == *" all "* ]]; then
           RUN_VALIDATE=true
@@ -124,6 +146,8 @@ runs:
           RUN_APPLY=true
           RUN_TEST=true
           RUN_LINT=true
+          RUN_TRIVY=true
+          RUN_CHECKOV=true
         else
           PADDED=" $NORMALISED "
           if [[ "$PADDED" == *" validate "* ]]; then
@@ -141,6 +165,12 @@ runs:
           if [[ "$PADDED" == *" lint "* ]]; then
             RUN_LINT=true
           fi
+          if [[ "$PADDED" == *" trivy "* ]]; then
+            RUN_TRIVY=true
+          fi
+          if [[ "$PADDED" == *" checkov "* ]]; then
+            RUN_CHECKOV=true
+          fi
         fi
 
         echo "run_validate=$RUN_VALIDATE" >> $GITHUB_OUTPUT
@@ -148,6 +178,8 @@ runs:
         echo "run_apply=$RUN_APPLY" >> $GITHUB_OUTPUT
         echo "run_test=$RUN_TEST" >> $GITHUB_OUTPUT
         echo "run_lint=$RUN_LINT" >> $GITHUB_OUTPUT
+        echo "run_trivy=$RUN_TRIVY" >> $GITHUB_OUTPUT
+        echo "run_checkov=$RUN_CHECKOV" >> $GITHUB_OUTPUT
 
     - name: Parse CLI args
       id: parse-cli-args
@@ -451,6 +483,24 @@ runs:
 
         echo "test-tfvar-args=$TEST_TFVAR_ARGS" >> $GITHUB_OUTPUT
 
+    - name: Parse Checkov skip checks
+      id: parse-checkov-skip-checks
+      if: ${{ steps.parse-steps.outputs.run_checkov == 'true' }}
+      shell: bash
+      run: |
+        CHECKOV_SKIP_CHECKS="${{ inputs['checkov-skip-checks'] }}"
+        CHECKOV_SKIP_ARG=""
+
+        if [ -n "$CHECKOV_SKIP_CHECKS" ]; then
+          NORMALISED_CHECKS=$(echo "$CHECKOV_SKIP_CHECKS" | tr '\n,' ' ' | tr -s ' ')
+          CHECKS_LIST=$(echo "$NORMALISED_CHECKS" | tr ' ' ',' | sed 's/^,*//;s/,*$//;s/,,*/,/g')
+          if [ -n "$CHECKS_LIST" ]; then
+            CHECKOV_SKIP_ARG="--skip-check $CHECKS_LIST"
+          fi
+        fi
+
+        echo "checkov-skip-arg=$CHECKOV_SKIP_ARG" >> $GITHUB_OUTPUT
+
     - name: Validate
       id: validate
       if: ${{ steps.parse-steps.outputs.run_validate == 'true' }}
@@ -668,10 +718,17 @@ runs:
         esac
 
         CONFIG_ARG=""
+        TFLINT_CONFIG=""
         if [ -f ".tflint.hcl" ]; then
-          CONFIG_ARG="--config $(pwd)/.tflint.hcl"
+          TFLINT_CONFIG="$(pwd)/.tflint.hcl"
         elif [ -f "$GITHUB_WORKSPACE/.tflint.hcl" ]; then
-          CONFIG_ARG="--config $GITHUB_WORKSPACE/.tflint.hcl"
+          TFLINT_CONFIG="$GITHUB_WORKSPACE/.tflint.hcl"
+        elif [ -f "$GITHUB_ACTION_PATH/.tflint.hcl" ]; then
+          TFLINT_CONFIG="$GITHUB_ACTION_PATH/.tflint.hcl"
+        fi
+
+        if [ -n "$TFLINT_CONFIG" ]; then
+          CONFIG_ARG="--config $TFLINT_CONFIG"
         fi
 
         if ! find . -name "*.tf" -print -quit | grep -q .; then
@@ -711,11 +768,15 @@ runs:
 
         if [ "$LINT_EXIT" -eq 0 ]; then
           LINT_STATUS="pass"
-          LINT_DETAILS="No issues found."
+          LINT_DETAILS="${LINT_ISSUE_COUNT} issue(s) found."
           echo "lint_failed=false" >> $GITHUB_OUTPUT
         else
           LINT_STATUS="fail"
-          LINT_DETAILS="${LINT_ISSUE_COUNT} issue(s) found."
+          if [ "$LINT_ISSUE_COUNT" -gt 0 ]; then
+            LINT_DETAILS="${LINT_ISSUE_COUNT} issue(s) found."
+          else
+            LINT_DETAILS="TFLint failed before reporting results."
+          fi
           echo "lint_failed=true" >> $GITHUB_OUTPUT
         fi
 
@@ -763,6 +824,314 @@ runs:
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧹 TFLint | $LINT_SUMMARY_STATUS | $LINT_DETAILS |" \
+              ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Setup Trivy
+      if: ${{ steps.parse-steps.outputs.run_trivy == 'true' }}
+      shell: bash
+      run: |
+        TRIVY_VERSION="${{ inputs['trivy-version'] }}"
+
+        if [ -z "$TRIVY_VERSION" ] || [ "$TRIVY_VERSION" = "latest" ]; then
+          TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+        fi
+
+        curl -sSL -o /tmp/trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+        tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+        install -m 0755 /tmp/trivy "$HOME/.local/bin/trivy"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        trivy --version
+
+    - name: Trivy Scan
+      id: trivy
+      if: ${{ steps.parse-steps.outputs.run_trivy == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        SUMMARY_MODE="${{ inputs['summary-mode'] }}"
+
+        if [ -z "$SUMMARY_MODE" ]; then
+          SUMMARY_MODE="full"
+        fi
+
+        case "$SUMMARY_MODE" in
+          full|redacted|off)
+            ;;
+          *)
+            echo "Error: summary-mode must be full, redacted, or off"
+            exit 1
+            ;;
+        esac
+
+        TRIVY_ARGS="${{ inputs['trivy-args'] }}"
+        if [ -n "$TRIVY_ARGS" ]; then
+          TRIVY_ARGS=$(echo "$TRIVY_ARGS" | xargs)
+        fi
+
+        TRIVY_CONFIG=""
+        if [ -f ".trivy.yaml" ]; then
+          TRIVY_CONFIG="$(pwd)/.trivy.yaml"
+        elif [ -f "$GITHUB_WORKSPACE/.trivy.yaml" ]; then
+          TRIVY_CONFIG="$GITHUB_WORKSPACE/.trivy.yaml"
+        elif [ -f "$GITHUB_ACTION_PATH/.trivy.yaml" ]; then
+          TRIVY_CONFIG="$GITHUB_ACTION_PATH/.trivy.yaml"
+        fi
+        TRIVY_CONFIG_ARG=""
+        if [ -n "$TRIVY_CONFIG" ]; then
+          TRIVY_CONFIG_ARG="--config $TRIVY_CONFIG"
+        fi
+
+        if ! find . \( -name "*.tf" -o -name "*.tf.json" -o -name "*.tfvars" -o -name "*.tfvars.json" \) -print -quit | grep -q .; then
+          echo "::warning::No Terraform/OpenTofu files found to scan with Trivy in '${{ inputs.workdir }}'."
+          echo "trivy_ran=false" >> $GITHUB_OUTPUT
+          echo "trivy_skipped=true" >> $GITHUB_OUTPUT
+          echo "trivy_failed=false" >> $GITHUB_OUTPUT
+          echo "trivy_status=skipped" >> $GITHUB_OUTPUT
+          echo "trivy_issue_count=0" >> $GITHUB_OUTPUT
+          echo "trivy_details=No Terraform/OpenTofu files found to scan." >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        set +e
+        trivy config $TRIVY_CONFIG_ARG $TRIVY_ARGS --format json --output trivy_output.json .
+        TRIVY_EXIT=$?
+        set -e
+
+        TRIVY_ISSUE_COUNT=0
+        if [ -f trivy_output.json ]; then
+          TRIVY_ISSUE_COUNT=$(jq '[.Results[]?.Misconfigurations[]? | select(.Status == "FAIL")] | length' trivy_output.json 2>/dev/null || echo 0)
+        fi
+
+        if [ -z "$TRIVY_ISSUE_COUNT" ]; then
+          TRIVY_ISSUE_COUNT=0
+        fi
+
+        if [ "$TRIVY_EXIT" -eq 0 ]; then
+          TRIVY_STATUS="pass"
+          TRIVY_DETAILS="${TRIVY_ISSUE_COUNT} issue(s) found."
+          echo "trivy_failed=false" >> $GITHUB_OUTPUT
+        else
+          TRIVY_STATUS="fail"
+          if [ "$TRIVY_ISSUE_COUNT" -gt 0 ]; then
+            TRIVY_DETAILS="${TRIVY_ISSUE_COUNT} issue(s) found."
+          else
+            TRIVY_DETAILS="Trivy scan failed before reporting results."
+          fi
+          echo "trivy_failed=true" >> $GITHUB_OUTPUT
+        fi
+
+        echo "trivy_ran=true" >> $GITHUB_OUTPUT
+        echo "trivy_skipped=false" >> $GITHUB_OUTPUT
+        echo "trivy_status=$TRIVY_STATUS" >> $GITHUB_OUTPUT
+        echo "trivy_issue_count=$TRIVY_ISSUE_COUNT" >> $GITHUB_OUTPUT
+        printf 'trivy_details=%s\n' "$TRIVY_DETAILS" >> "$GITHUB_OUTPUT"
+
+        if [ "$TRIVY_STATUS" = "pass" ]; then
+          TRIVY_SUMMARY_STATUS="✅ Pass"
+        else
+          TRIVY_SUMMARY_STATUS="❌ Fail"
+        fi
+
+        TRIVY_OUTPUT=""
+        if [ "$TRIVY_ISSUE_COUNT" -gt 0 ]; then
+          TRIVY_ISSUES=$(jq -r '
+            [.Results[]?.Misconfigurations[]? | select(.Status == "FAIL")] |
+            map("- [" + (.Severity // "UNKNOWN") + "] " + (.ID // "UNKNOWN") + ": " + (.Title // "Issue") + (if .CauseMetadata.Resource then " (" + .CauseMetadata.Resource + ")" else "" end)) |
+            .[]
+          ' trivy_output.json 2>/dev/null || true)
+          if [ -z "$TRIVY_ISSUES" ]; then
+            TRIVY_ISSUES="Trivy findings available in trivy_output.json."
+          fi
+          TRIVY_OUTPUT=$(printf '%s\n' \
+            "### ⚠️ Trivy Issues" \
+            "Trivy reported ${TRIVY_ISSUE_COUNT} issue(s)." \
+            "" \
+            '```' \
+            "$TRIVY_ISSUES" \
+            '```' \
+          )
+        fi
+
+        if [ "$SUMMARY_MODE" = "full" ]; then
+          {
+            printf '%s\n' "## 🛡️ Tofu Trivy" "" \
+              "| Check | Status | Details |" \
+              "|-------|--------|---------|" \
+              "| 🛡️ Trivy | $TRIVY_SUMMARY_STATUS | $TRIVY_DETAILS |" \
+              "" \
+              "$TRIVY_OUTPUT" \
+              ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$SUMMARY_MODE" = "redacted" ]; then
+          {
+            printf '%s\n' "## 🛡️ Tofu Trivy" "" \
+              "| Check | Status | Details |" \
+              "|-------|--------|---------|" \
+              "| 🛡️ Trivy | $TRIVY_SUMMARY_STATUS | $TRIVY_DETAILS |" \
+              ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Setup Checkov
+      if: ${{ steps.parse-steps.outputs.run_checkov == 'true' }}
+      shell: bash
+      run: |
+        CHECKOV_VERSION="${{ inputs['checkov-version'] }}"
+
+        if [ -z "$CHECKOV_VERSION" ] || [ "$CHECKOV_VERSION" = "latest" ]; then
+          python3 -m pip install --upgrade checkov
+        else
+          python3 -m pip install --upgrade "checkov==${CHECKOV_VERSION}"
+        fi
+
+        checkov --version
+
+    - name: Checkov Scan
+      id: checkov
+      if: ${{ steps.parse-steps.outputs.run_checkov == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        SUMMARY_MODE="${{ inputs['summary-mode'] }}"
+
+        if [ -z "$SUMMARY_MODE" ]; then
+          SUMMARY_MODE="full"
+        fi
+
+        case "$SUMMARY_MODE" in
+          full|redacted|off)
+            ;;
+          *)
+            echo "Error: summary-mode must be full, redacted, or off"
+            exit 1
+            ;;
+        esac
+
+        CHECKOV_ARGS="${{ inputs['checkov-args'] }}"
+        CHECKOV_SKIP_ARG="${{ steps.parse-checkov-skip-checks.outputs.checkov-skip-arg }}"
+        if [ -n "$CHECKOV_ARGS" ]; then
+          CHECKOV_ARGS=$(echo "$CHECKOV_ARGS" | xargs)
+        fi
+
+        CHECKOV_CONFIG=""
+        if [ -f ".checkov.yaml" ]; then
+          CHECKOV_CONFIG="$(pwd)/.checkov.yaml"
+        elif [ -f "$GITHUB_WORKSPACE/.checkov.yaml" ]; then
+          CHECKOV_CONFIG="$GITHUB_WORKSPACE/.checkov.yaml"
+        elif [ -f "$GITHUB_ACTION_PATH/.checkov.yaml" ]; then
+          CHECKOV_CONFIG="$GITHUB_ACTION_PATH/.checkov.yaml"
+        fi
+        CHECKOV_CONFIG_ARG=""
+        if [ -n "$CHECKOV_CONFIG" ]; then
+          CHECKOV_CONFIG_ARG="--config-file $CHECKOV_CONFIG"
+        fi
+
+        if ! find . \( -name "*.tf" -o -name "*.tf.json" -o -name "*.tfvars" -o -name "*.tfvars.json" \) -print -quit | grep -q .; then
+          echo "::warning::No Terraform/OpenTofu files found to scan with Checkov in '${{ inputs.workdir }}'."
+          echo "checkov_ran=false" >> $GITHUB_OUTPUT
+          echo "checkov_skipped=true" >> $GITHUB_OUTPUT
+          echo "checkov_failed=false" >> $GITHUB_OUTPUT
+          echo "checkov_status=skipped" >> $GITHUB_OUTPUT
+          echo "checkov_issue_count=0" >> $GITHUB_OUTPUT
+          echo "checkov_details=No Terraform/OpenTofu files found to scan." >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        set +e
+        checkov -d . $CHECKOV_CONFIG_ARG $CHECKOV_SKIP_ARG $CHECKOV_ARGS --output json > checkov_output.json
+        CHECKOV_EXIT=$?
+        set -e
+
+        CHECKOV_ISSUE_COUNT=0
+        if [ -f checkov_output.json ]; then
+          CHECKOV_ISSUE_COUNT=$(jq -r '
+            if .summary and (.summary.failed // .summary.failed_checks // .summary.failed_count) then
+              (.summary.failed // .summary.failed_checks // .summary.failed_count)
+            elif .results and .results.failed_checks then
+              (.results.failed_checks | length)
+            elif .failed_checks then
+              (.failed_checks | length)
+            else
+              0
+            end
+          ' checkov_output.json 2>/dev/null || echo 0)
+        fi
+
+        if [ -z "$CHECKOV_ISSUE_COUNT" ]; then
+          CHECKOV_ISSUE_COUNT=0
+        fi
+
+        if [ "$CHECKOV_EXIT" -eq 0 ]; then
+          CHECKOV_STATUS="pass"
+          CHECKOV_DETAILS="${CHECKOV_ISSUE_COUNT} issue(s) found."
+          echo "checkov_failed=false" >> $GITHUB_OUTPUT
+        else
+          CHECKOV_STATUS="fail"
+          if [ "$CHECKOV_ISSUE_COUNT" -gt 0 ]; then
+            CHECKOV_DETAILS="${CHECKOV_ISSUE_COUNT} issue(s) found."
+          else
+            CHECKOV_DETAILS="Checkov scan failed before reporting results."
+          fi
+          echo "checkov_failed=true" >> $GITHUB_OUTPUT
+        fi
+
+        echo "checkov_ran=true" >> $GITHUB_OUTPUT
+        echo "checkov_skipped=false" >> $GITHUB_OUTPUT
+        echo "checkov_status=$CHECKOV_STATUS" >> $GITHUB_OUTPUT
+        echo "checkov_issue_count=$CHECKOV_ISSUE_COUNT" >> $GITHUB_OUTPUT
+        printf 'checkov_details=%s\n' "$CHECKOV_DETAILS" >> "$GITHUB_OUTPUT"
+
+        if [ "$CHECKOV_STATUS" = "pass" ]; then
+          CHECKOV_SUMMARY_STATUS="✅ Pass"
+        else
+          CHECKOV_SUMMARY_STATUS="❌ Fail"
+        fi
+
+        CHECKOV_OUTPUT=""
+        if [ "$CHECKOV_ISSUE_COUNT" -gt 0 ]; then
+          CHECKOV_ISSUES=$(jq -r '
+            if .results and .results.failed_checks then
+              .results.failed_checks[]? |
+              "- " + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue") +
+              (if .file_path then " (" + .file_path + (if .resource then ", " + .resource else "" end) + ")" else "" end)
+            elif .failed_checks then
+              .failed_checks[]? |
+              "- " + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue")
+            else
+              empty
+            end
+          ' checkov_output.json 2>/dev/null || true)
+          if [ -z "$CHECKOV_ISSUES" ]; then
+            CHECKOV_ISSUES="Checkov findings available in checkov_output.json."
+          fi
+          CHECKOV_OUTPUT=$(printf '%s\n' \
+            "### ⚠️ Checkov Issues" \
+            "Checkov reported ${CHECKOV_ISSUE_COUNT} issue(s)." \
+            "" \
+            '```' \
+            "$CHECKOV_ISSUES" \
+            '```' \
+          )
+        fi
+
+        if [ "$SUMMARY_MODE" = "full" ]; then
+          {
+            printf '%s\n' "## 🔐 Tofu Checkov" "" \
+              "| Check | Status | Details |" \
+              "|-------|--------|---------|" \
+              "| 🔐 Checkov | $CHECKOV_SUMMARY_STATUS | $CHECKOV_DETAILS |" \
+              "" \
+              "$CHECKOV_OUTPUT" \
+              ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        elif [ "$SUMMARY_MODE" = "redacted" ]; then
+          {
+            printf '%s\n' "## 🔐 Tofu Checkov" "" \
+              "| Check | Status | Details |" \
+              "|-------|--------|---------|" \
+              "| 🔐 Checkov | $CHECKOV_SUMMARY_STATUS | $CHECKOV_DETAILS |" \
               ""
           } >> "$GITHUB_STEP_SUMMARY"
         fi
@@ -870,7 +1239,7 @@ runs:
         fi
 
     - name: Checks Comment
-      if: ${{ always() && github.event_name == 'pull_request' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' && (steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_test == 'true') }}
+      if: ${{ always() && github.event_name == 'pull_request' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' && (steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_trivy == 'true' || steps.parse-steps.outputs.run_checkov == 'true' || steps.parse-steps.outputs.run_test == 'true') }}
       uses: actions/github-script@v6
       with:
         script: |
@@ -923,6 +1292,8 @@ runs:
 
           const runValidate = '${{ steps.parse-steps.outputs.run_validate }}' === 'true';
           const runLint = '${{ steps.parse-steps.outputs.run_lint }}' === 'true';
+          const runTrivy = '${{ steps.parse-steps.outputs.run_trivy }}' === 'true';
+          const runCheckov = '${{ steps.parse-steps.outputs.run_checkov }}' === 'true';
           const runTest = '${{ steps.parse-steps.outputs.run_test }}' === 'true';
 
           if (runValidate) {
@@ -980,13 +1351,89 @@ runs:
 
               if (lintRan) {
                 status = lintFailed ? '❌ Fail' : '✅ Pass';
-                details = lintFailed ? `${lintIssueCount} issue(s) found.` : 'No issues found.';
+                if (lintFailed && lintIssueCount === 0 && lintDetails) {
+                  details = lintDetails;
+                } else {
+                  details = `${lintIssueCount} issue(s) found.`;
+                }
               } else if (lintSkipped) {
                 details = lintDetails || 'No Terraform/OpenTofu files to lint.';
               }
             }
 
             rows['🧹 TFLint'] = { status, details };
+          }
+
+          if (runTrivy) {
+            const trivyRanOutput = `${{ steps.trivy.outputs.trivy_ran }}`;
+            const trivySkippedOutput = `${{ steps.trivy.outputs.trivy_skipped }}`;
+            const trivyFailedOutput = `${{ steps.trivy.outputs.trivy_failed }}`;
+            const trivyStatusOutput = `${{ steps.trivy.outputs.trivy_status }}`;
+            const trivyIssueCount = Number(`${{ steps.trivy.outputs.trivy_issue_count }}` || 0);
+            const trivyDetails = `${{ steps.trivy.outputs.trivy_details }}`;
+            const trivyOutcome = `${{ steps.trivy.outcome }}`;
+            const trivyOutputsPresent = trivyStatusOutput !== '';
+
+            let status = '⚠️ Skipped';
+            let details = 'No Terraform/OpenTofu files to scan.';
+
+            if (!trivyOutputsPresent && trivyOutcome && trivyOutcome !== 'success') {
+              status = '❌ Fail';
+              details = 'Trivy scan failed before reporting status.';
+            } else {
+              const trivyRan = trivyRanOutput === 'true';
+              const trivySkipped = trivySkippedOutput === 'true';
+              const trivyFailed = trivyFailedOutput === 'true';
+
+              if (trivyRan) {
+                status = trivyFailed ? '❌ Fail' : '✅ Pass';
+                if (trivyFailed && trivyIssueCount === 0 && trivyDetails) {
+                  details = trivyDetails;
+                } else {
+                  details = `${trivyIssueCount} issue(s) found.`;
+                }
+              } else if (trivySkipped) {
+                details = trivyDetails || 'No Terraform/OpenTofu files to scan.';
+              }
+            }
+
+            rows['🛡️ Trivy'] = { status, details };
+          }
+
+          if (runCheckov) {
+            const checkovRanOutput = `${{ steps.checkov.outputs.checkov_ran }}`;
+            const checkovSkippedOutput = `${{ steps.checkov.outputs.checkov_skipped }}`;
+            const checkovFailedOutput = `${{ steps.checkov.outputs.checkov_failed }}`;
+            const checkovStatusOutput = `${{ steps.checkov.outputs.checkov_status }}`;
+            const checkovIssueCount = Number(`${{ steps.checkov.outputs.checkov_issue_count }}` || 0);
+            const checkovDetails = `${{ steps.checkov.outputs.checkov_details }}`;
+            const checkovOutcome = `${{ steps.checkov.outcome }}`;
+            const checkovOutputsPresent = checkovStatusOutput !== '';
+
+            let status = '⚠️ Skipped';
+            let details = 'No Terraform/OpenTofu files to scan.';
+
+            if (!checkovOutputsPresent && checkovOutcome && checkovOutcome !== 'success') {
+              status = '❌ Fail';
+              details = 'Checkov scan failed before reporting status.';
+            } else {
+              const checkovRan = checkovRanOutput === 'true';
+              const checkovSkipped = checkovSkippedOutput === 'true';
+              const checkovFailed = checkovFailedOutput === 'true';
+
+              if (checkovRan) {
+                status = checkovFailed ? '❌ Fail' : '✅ Pass';
+                if (checkovFailed && checkovIssueCount === 0 && checkovDetails) {
+                  details = checkovDetails;
+                } else {
+                  details = `${checkovIssueCount} issue(s) found.`;
+                }
+              } else if (checkovSkipped) {
+                details = checkovDetails || 'No Terraform/OpenTofu files to scan.';
+              }
+            }
+
+            rows['🔐 Checkov'] = { status, details };
           }
 
           if (runTest) {
@@ -1029,6 +1476,8 @@ runs:
             '🎯 Tofu Format',
             '🔍 Tofu Validate',
             '🧹 TFLint',
+            '🛡️ Trivy',
+            '🔐 Checkov',
             '🧪 Tofu Test (Unit)',
             '🧪 Tofu Test (Integration)',
           ];
@@ -1097,7 +1546,7 @@ runs:
           }
 
     - name: Check for check failures
-      if: ${{ always() && (steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_test == 'true') }}
+      if: ${{ always() && (steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_trivy == 'true' || steps.parse-steps.outputs.run_checkov == 'true' || steps.parse-steps.outputs.run_test == 'true') }}
       shell: bash
       run: |
         FAILURES=0
@@ -1124,6 +1573,28 @@ runs:
           fi
           if [[ "${{ steps.lint.outputs.lint_failed }}" == "true" ]]; then
             echo "::error::TFLint checks failed"
+            FAILURES=$((FAILURES + 1))
+          fi
+        fi
+
+        if [[ "${{ steps.parse-steps.outputs.run_trivy }}" == "true" ]]; then
+          if [[ "${{ steps.trivy.outcome }}" != "success" ]]; then
+            echo "::error::Trivy step failed before reporting status"
+            FAILURES=$((FAILURES + 1))
+          fi
+          if [[ "${{ steps.trivy.outputs.trivy_failed }}" == "true" ]]; then
+            echo "::error::Trivy checks failed"
+            FAILURES=$((FAILURES + 1))
+          fi
+        fi
+
+        if [[ "${{ steps.parse-steps.outputs.run_checkov }}" == "true" ]]; then
+          if [[ "${{ steps.checkov.outcome }}" != "success" ]]; then
+            echo "::error::Checkov step failed before reporting status"
+            FAILURES=$((FAILURES + 1))
+          fi
+          if [[ "${{ steps.checkov.outputs.checkov_failed }}" == "true" ]]; then
+            echo "::error::Checkov checks failed"
             FAILURES=$((FAILURES + 1))
           fi
         fi
