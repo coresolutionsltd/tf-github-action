@@ -21,6 +21,7 @@
   * [Approval Gates](#approval-gates)
     * [Separate Plan and Apply Jobs](#separate-plan-and-apply-jobs)
   * [Comment and Summary Controls](#comment-and-summary-controls)
+  * [Testing](#testing)
 * [Contributing](#contributing)
   * [Guidelines](#guidelines)
   * [Contribution Workflow](#contribution-workflow)
@@ -45,11 +46,14 @@ Workflow summaries are automatically updated from the different stages, this mak
 | `version` | <p>The OpenTofu version to install (e.g., 1.11.x).</p> | `false` | `1.11.x` |
 | `workdir` | <p>Path to the TF configuration directory (relative to repository root).</p> | `false` | `.` |
 | `env` | <p>Deployment environment (eg <code>dev</code>, <code>staging</code> or <code>prod</code>). Accepts any string.</p> | `false` | `""` |
-| `steps` | <p>Steps to run: <code>validate</code>, <code>plan</code>, <code>apply</code> (comma, space or newline separated). Use `all`` to run all steps.</p> | `false` | `all` |
+| `steps` | <p>Steps to run: <code>validate</code>, <code>plan</code>, <code>apply</code>, <code>test</code> (comma, space or newline separated). Use `all`` to run all steps.</p> | `false` | `all` |
 | `tfvar-files` | <p>Comma, space or newline separated list of tfvar files to include</p> | `false` | `""` |
 | `tfvars` | <p>Comma, space or newline separated key-value pairs for terraform variables (format: key1=value1)</p> | `false` | `""` |
 | `backend-config-var-files` | <p>Comma, space or newline  separated list of backend config files to include</p> | `false` | `""` |
 | `backend-config-vars` | <p>Comma, space or newline separated key-value pairs for backend configuration (format: key1=value1)</p> | `false` | `""` |
+| `test-dir` | <p>Directory containing OpenTofu tests (relative to workdir)</p> | `false` | `tests` |
+| `test-tfvar-files` | <p>Comma, space or newline separated list of tfvar files to include for tests (defaults to tfvar-files)</p> | `false` | `""` |
+| `test-tfvars` | <p>Comma, space or newline separated key-value pairs for test variables (defaults to tfvars)</p> | `false` | `""` |
 | `lock-timeout` | <p>State lock timeout for plan/apply (e.g., 5m)</p> | `false` | `""` |
 | `parallelism` | <p>Parallelism for plan/apply</p> | `false` | `""` |
 | `refresh` | <p>Refresh behavior for plan/apply (<code>true</code> or <code>false</code>)</p> | `false` | `""` |
@@ -90,7 +94,7 @@ Workflow summaries are automatically updated from the different stages, this mak
     # Default: ""
 
     steps:
-    # Steps to run: `validate`, `plan`, `apply` (comma, space or newline separated). Use `all`` to run all steps.
+    # Steps to run: `validate`, `plan`, `apply`, `test` (comma, space or newline separated). Use `all`` to run all steps.
     #
     # Required: false
     # Default: all
@@ -115,6 +119,24 @@ Workflow summaries are automatically updated from the different stages, this mak
 
     backend-config-vars:
     # Comma, space or newline separated key-value pairs for backend configuration (format: key1=value1)
+    #
+    # Required: false
+    # Default: ""
+
+    test-dir:
+    # Directory containing OpenTofu tests (relative to workdir)
+    #
+    # Required: false
+    # Default: tests
+
+    test-tfvar-files:
+    # Comma, space or newline separated list of tfvar files to include for tests (defaults to tfvar-files)
+    #
+    # Required: false
+    # Default: ""
+
+    test-tfvars:
+    # Comma, space or newline separated key-value pairs for test variables (defaults to tfvars)
     #
     # Required: false
     # Default: ""
@@ -426,6 +448,41 @@ Control PR comments and redact plan/apply output in summaries.
 ```
 
 Use `comment-identifier` if you want separate sticky comments per workflow or environment.
+
+### Testing
+
+OpenTofu tests run via `tofu test`. Unit tests typically use `command = plan` (no changes applied), while integration tests use `command = apply` to exercise full deployments.
+
+Recommended structure:
+
+```
+.
+├── main.tf
+└── tests/
+    ├── unit/
+    │   └── validations.tftest.hcl  # Contains command = plan
+    └── integration/
+        └── deploy_aws.tftest.hcl   # Contains command = apply
+```
+
+To run both unit and integration tests, invoke the action twice with `steps: test` and point `test-dir` at the directory you want to execute. `test-tfvars` and `test-tfvar-files` default to `tfvars`/`tfvar-files` unless explicitly set.
+If the test directory is missing or contains no `.tftest.hcl` files, the action emits a warning and skips tests.
+
+```yaml
+- name: Run unit tests
+  uses: coresolutionsltd/tf-github-action@main
+  with:
+    workdir: ./infra
+    steps: test
+    test-dir: tests/unit
+
+- name: Run integration tests
+  uses: coresolutionsltd/tf-github-action@main
+  with:
+    workdir: ./infra
+    steps: test
+    test-dir: tests/integration
+```
 
 These examples are meant to give you the building blocks for putting together a complete infrastructure deployment workflow. You can mix and match them to create pipelines that validate, plan, and apply your configuration, while also adding steps for review and approval where it makes sense.
 
