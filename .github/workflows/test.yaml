@@ -235,6 +235,42 @@ jobs:
           comment-mode: off
           skip-plan-upload: true
 
+  tofu-test-unit:
+    name: OpenTofu Test (Unit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run unit tests
+        uses: ./
+        with:
+          workdir: test/valid
+          steps: test
+          test-dir: tests/unit
+          comment-mode: sticky
+          comment-identifier: tf-github-action
+          summary-mode: redacted
+          skip-plan-upload: true
+
+  tofu-test-integration:
+    name: OpenTofu Test (Integration)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run integration tests
+        uses: ./
+        with:
+          workdir: test/valid
+          steps: test
+          test-dir: tests/integration
+          comment-mode: sticky
+          comment-identifier: tf-github-action
+          summary-mode: redacted
+          skip-plan-upload: true
+
   pr-comment-smoke:
     name: PR Comment Smoke (Validate/Plan/Apply)
     if: ${{ github.event_name == 'pull_request' }}

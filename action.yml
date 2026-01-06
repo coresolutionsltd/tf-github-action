@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ""
   steps:
-    description: 'Steps to run: `validate`, `plan`, `apply` (comma, space or newline separated). Use `all`` to run all steps.'
+    description: 'Steps to run: `validate`, `plan`, `apply`, `test` (comma, space or newline separated). Use `all`` to run all steps.'
     required: false
     default: 'all'
   tfvar-files:
@@ -36,6 +36,18 @@ inputs:
     default: ''
   backend-config-vars:
     description: 'Comma, space or newline separated key-value pairs for backend configuration (format: key1=value1)'
+    required: false
+    default: ''
+  test-dir:
+    description: 'Directory containing OpenTofu tests (relative to workdir)'
+    required: false
+    default: 'tests'
+  test-tfvar-files:
+    description: 'Comma, space or newline separated list of tfvar files to include for tests (defaults to tfvar-files)'
+    required: false
+    default: ''
+  test-tfvars:
+    description: 'Comma, space or newline separated key-value pairs for test variables (defaults to tfvars)'
     required: false
     default: ''
   lock-timeout:
@@ -99,11 +111,13 @@ runs:
         RUN_VALIDATE=false
         RUN_PLAN=false
         RUN_APPLY=false
+        RUN_TEST=false
 
         if [ -z "$NORMALISED" ] || [ "$NORMALISED" = "all" ] || [[ " $NORMALISED " == *" all "* ]]; then
           RUN_VALIDATE=true
           RUN_PLAN=true
           RUN_APPLY=true
+          RUN_TEST=true
         else
           PADDED=" $NORMALISED "
           if [[ "$PADDED" == *" validate "* ]]; then
@@ -115,11 +129,15 @@ runs:
           if [[ "$PADDED" == *" apply "* ]]; then
             RUN_APPLY=true
           fi
+          if [[ "$PADDED" == *" test "* ]]; then
+            RUN_TEST=true
+          fi
         fi
 
         echo "run_validate=$RUN_VALIDATE" >> $GITHUB_OUTPUT
         echo "run_plan=$RUN_PLAN" >> $GITHUB_OUTPUT
         echo "run_apply=$RUN_APPLY" >> $GITHUB_OUTPUT
+        echo "run_test=$RUN_TEST" >> $GITHUB_OUTPUT
 
     - name: Parse CLI args
       id: parse-cli-args
@@ -343,6 +361,85 @@ runs:
         fi
 
         echo "tfvar-args=$TFVAR_ARGS" >> $GITHUB_OUTPUT
+
+    - name: Resolve test variables
+      id: resolve-test-vars
+      if: ${{ steps.parse-steps.outputs.run_test == 'true' }}
+      shell: bash
+      run: |
+        TEST_TFVAR_FILES="${{ inputs['test-tfvar-files'] }}"
+        if [ -z "$TEST_TFVAR_FILES" ]; then
+          TEST_TFVAR_FILES="${{ inputs['tfvar-files'] }}"
+        fi
+
+        TEST_TFVARS="${{ inputs['test-tfvars'] }}"
+        if [ -z "$TEST_TFVARS" ]; then
+          TEST_TFVARS="${{ inputs['tfvars'] }}"
+        fi
+
+        echo "test_tfvar_files=$TEST_TFVAR_FILES" >> $GITHUB_OUTPUT
+        echo "test_tfvars=$TEST_TFVARS" >> $GITHUB_OUTPUT
+
+    - name: Parse test tfvar files
+      id: parse-test-tfvar-files
+      if: ${{ steps.parse-steps.outputs.run_test == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        TEST_TFVAR_FILES="${{ steps.resolve-test-vars.outputs.test_tfvar_files }}"
+        TEST_TFVAR_ARGS=""
+
+        if [ -n "$TEST_TFVAR_FILES" ]; then
+          NORMALISED_FILES=$(echo "$TEST_TFVAR_FILES" | tr '\n,' ' ' | tr -s ' ')
+
+          for file in $NORMALISED_FILES; do
+            file=$(echo "$file" | xargs)
+            if [ -n "$file" ]; then
+              if [ -f "$file" ]; then
+                TEST_TFVAR_ARGS="$TEST_TFVAR_ARGS -var-file=$file"
+                echo "Added test tfvar file: $file"
+              else
+                echo "Warning: test tfvar file not found: $file"
+                exit 1
+              fi
+            fi
+          done
+
+          TEST_TFVAR_ARGS=$(echo "$TEST_TFVAR_ARGS" | sed 's/^ *//')
+        fi
+
+        echo "test-tfvar-file-args=$TEST_TFVAR_ARGS" >> $GITHUB_OUTPUT
+
+    - name: Parse test tfvars
+      id: parse-test-tfvars
+      if: ${{ steps.parse-steps.outputs.run_test == 'true' }}
+      shell: bash
+      run: |
+        TEST_TFVARS="${{ steps.resolve-test-vars.outputs.test_tfvars }}"
+        TEST_TFVAR_ARGS=""
+
+        if [ -n "$TEST_TFVARS" ]; then
+          NORMALISED_VARS=$(echo "$TEST_TFVARS" | tr '\n,' ' ' | tr -s ' ')
+
+          read -ra PAIRS <<< "$NORMALISED_VARS"
+          for pair in "${PAIRS[@]}"; do
+            pair=$(echo "$pair" | xargs)
+            if [ -n "$pair" ]; then
+              if [[ "$pair" =~ ^[a-zA-Z_][a-zA-Z0-9_]*=.* ]]; then
+                TEST_TFVAR_ARGS="$TEST_TFVAR_ARGS -var=$pair"
+                echo "Added test tfvar: ${pair%%=*}"
+              else
+                echo "Error: Invalid test tfvar format: $pair"
+                echo "Expected format: key=value"
+                exit 1
+              fi
+            fi
+          done
+
+          TEST_TFVAR_ARGS=$(echo "$TEST_TFVAR_ARGS" | sed 's/^ *//')
+        fi
+
+        echo "test-tfvar-args=$TEST_TFVAR_ARGS" >> $GITHUB_OUTPUT
 
     - name: Validate
       id: validate
@@ -582,6 +679,187 @@ runs:
           exit 1
         else
           echo "::notice::All validation checks passed"
+        fi
+
+    - name: Test
+      id: test
+      if: ${{ steps.parse-steps.outputs.run_test == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        TEST_DIR="${{ inputs['test-dir'] }}"
+        TEST_TFVAR_FILE_ARGS="${{ steps.parse-test-tfvar-files.outputs.test-tfvar-file-args }}"
+        TEST_TFVAR_ARGS="${{ steps.parse-test-tfvars.outputs.test-tfvar-args }}"
+
+        if [ -z "$TEST_DIR" ]; then
+          echo "::warning::No test directory configured; no OpenTofu tests were executed."
+          echo "test_ran=false" >> $GITHUB_OUTPUT
+          echo "test_skipped=true" >> $GITHUB_OUTPUT
+          echo "test_failed=false" >> $GITHUB_OUTPUT
+          echo "test_status=skipped" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        if [ ! -d "$TEST_DIR" ]; then
+          echo "::warning::Test directory '$TEST_DIR' not found; no OpenTofu tests were executed."
+          echo "test_ran=false" >> $GITHUB_OUTPUT
+          echo "test_skipped=true" >> $GITHUB_OUTPUT
+          echo "test_failed=false" >> $GITHUB_OUTPUT
+          echo "test_status=skipped" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        if ! find "$TEST_DIR" -name "*.tftest.hcl" -print -quit | grep -q .; then
+          echo "::warning::No OpenTofu test files found in '$TEST_DIR'; no tests were executed."
+          echo "test_ran=false" >> $GITHUB_OUTPUT
+          echo "test_skipped=true" >> $GITHUB_OUTPUT
+          echo "test_failed=false" >> $GITHUB_OUTPUT
+          echo "test_status=skipped" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        set +e
+        tofu test -test-directory="$TEST_DIR" $TEST_TFVAR_FILE_ARGS $TEST_TFVAR_ARGS
+        TEST_EXIT=$?
+        set -e
+
+        if [ "$TEST_EXIT" -eq 0 ]; then
+          TEST_STATUS="pass"
+          TEST_DETAILS="All OpenTofu tests passed in \`$TEST_DIR\`."
+          echo "test_failed=false" >> $GITHUB_OUTPUT
+        else
+          TEST_STATUS="fail"
+          TEST_DETAILS="OpenTofu tests failed in \`$TEST_DIR\`."
+          echo "test_failed=true" >> $GITHUB_OUTPUT
+        fi
+
+        echo "test_ran=true" >> $GITHUB_OUTPUT
+        echo "test_skipped=false" >> $GITHUB_OUTPUT
+        echo "test_status=$TEST_STATUS" >> $GITHUB_OUTPUT
+
+        cat << TEST_EOF >> "$GITHUB_STEP_SUMMARY"
+        ## 🧪 Test
+
+        | Check | Status | Details |
+        |-------|--------|---------|
+        | 🧪 Tests | $(if [ "$TEST_STATUS" = "pass" ]; then echo "✅ Pass"; else echo "❌ Fail"; fi) | $TEST_DETAILS |
+
+        TEST_EOF
+
+    - name: Test Comment
+      if: ${{ github.event_name == 'pull_request' && steps.parse-steps.outputs.run_test == 'true' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' }}
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          })
+          const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
+          const testDir = `${{ inputs['test-dir'] }}` || 'tests';
+          const commentMarker = `<!-- ${commentIdentifier}:test -->`;
+          const testComment = comments.find(comment => {
+            return comment.body && comment.body.includes(commentMarker)
+          }) || comments.find(comment => {
+            return comment.body && comment.body.includes('TF Test Results')
+          })
+
+          const testRan = ${{ steps.test.outputs.test_ran }};
+          const testSkipped = ${{ steps.test.outputs.test_skipped }};
+          const testFailed = ${{ steps.test.outputs.test_failed }};
+
+          const checkName = (testDir.split('/').filter(Boolean).pop() || 'Tests')
+            .replace(/[-_]/g, ' ')
+            .replace(/\b\w/g, c => c.toUpperCase());
+
+          let status = '⚠️ Skipped';
+          let details = `No OpenTofu tests were executed in \`${testDir}\`.`;
+
+          if (testRan) {
+            if (testFailed) {
+              status = '❌ Fail';
+              details = `OpenTofu tests failed in \`${testDir}\`.`;
+            } else {
+              status = '✅ Pass';
+              details = `All OpenTofu tests passed in \`${testDir}\`.`;
+            }
+          } else if (testSkipped) {
+            details = `No OpenTofu tests were executed in \`${testDir}\`.`;
+          }
+
+          const rows = {};
+
+          if (testComment && testComment.body) {
+            const lines = testComment.body.split('\n');
+            for (const line of lines) {
+              if (!line.trim().startsWith('|')) {
+                continue;
+              }
+              const cells = line.split('|').map(cell => cell.trim()).filter(Boolean);
+              if (cells.length < 3) {
+                continue;
+              }
+              const [check, rowStatus, rowDetails] = cells;
+              if (check === 'Check' || check === '-------') {
+                continue;
+              }
+              rows[check] = { status: rowStatus, details: rowDetails };
+            }
+          }
+
+          rows[checkName] = { status, details };
+
+          const preferredOrder = ['Unit', 'Integration'];
+          const orderedChecks = [
+            ...preferredOrder.filter(name => rows[name]),
+            ...Object.keys(rows).filter(name => !preferredOrder.includes(name)).sort(),
+          ];
+
+          const tableLines = [
+            '| Check | Status | Details |',
+            '|-------|--------|---------|',
+            ...orderedChecks.map(name => {
+              const row = rows[name];
+              return `| ${name} | ${row.status} | ${row.details} |`;
+            }),
+          ];
+
+          let testSummary = `${commentMarker}
+          ### 🧪 TF Test Results
+          ${tableLines.join('\n')}`;
+
+          const anyFail = Object.values(rows).some(row => row.status.includes('❌'));
+          const anySkip = Object.values(rows).some(row => row.status.includes('⚠️'));
+          if (!anyFail && !anySkip && Object.keys(rows).length > 0) {
+            testSummary += `\n\nAll tests passed! 🎉`;
+          }
+
+          if (testComment) {
+            github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: testComment.id,
+              body: testSummary
+            })
+          } else {
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: testSummary
+            })
+          }
+
+    - name: Check for test failures
+      if: ${{ steps.parse-steps.outputs.run_test == 'true' }}
+      shell: bash
+      run: |
+        if [[ "${{ steps.test.outputs.test_failed }}" == "true" ]]; then
+          echo "::error::OpenTofu tests failed"
+          exit 1
+        else
+          echo "::notice::OpenTofu tests passed or were skipped"
         fi
 
     - name: Plan
