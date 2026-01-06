@@ -42,7 +42,7 @@ Workflow summaries are automatically updated from the different stages, this mak
 
 | name | description | required | default |
 | --- | --- | --- | --- |
-| `version` | <p>The OpenTofu version to install (e.g., 1.10.x).</p> | `false` | `1.10.x` |
+| `version` | <p>The OpenTofu version to install (e.g., 1.11.x).</p> | `false` | `1.11.x` |
 | `workdir` | <p>Path to the TF configuration directory (relative to repository root).</p> | `false` | `.` |
 | `env` | <p>Deployment environment (eg <code>dev</code>, <code>staging</code> or <code>prod</code>). Accepts any string.</p> | `false` | `""` |
 | `steps` | <p>Steps to run: <code>validate</code>, <code>plan</code>, <code>apply</code> (comma, space or newline separated). Use `all`` to run all steps.</p> | `false` | `all` |
@@ -72,10 +72,10 @@ Workflow summaries are automatically updated from the different stages, this mak
 - uses: coresolutionsltd/tf-github-action@main
   with:
     version:
-    # The OpenTofu version to install (e.g., 1.10.x).
+    # The OpenTofu version to install (e.g., 1.11.x).
     #
     # Required: false
-    # Default: 1.10.x
+    # Default: 1.11.x
 
     workdir:
     # Path to the TF configuration directory (relative to repository root).
