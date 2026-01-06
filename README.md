@@ -1,4 +1,4 @@
-# TF Github Action
+# Tofu GitHub Action
 
 <!-- toc -->
 
@@ -45,7 +45,7 @@ Workflow summaries are automatically updated from the different stages, this mak
 | name | description | required | default |
 | --- | --- | --- | --- |
 | `version` | <p>The OpenTofu version to install (e.g., 1.11.x).</p> | `false` | `1.11.x` |
-| `workdir` | <p>Path to the TF configuration directory (relative to repository root).</p> | `false` | `.` |
+| `workdir` | <p>Path to the Tofu configuration directory (relative to repository root).</p> | `false` | `.` |
 | `env` | <p>Deployment environment (eg <code>dev</code>, <code>staging</code> or <code>prod</code>). Accepts any string.</p> | `false` | `""` |
 | `steps` | <p>Steps to run: <code>validate</code>, <code>plan</code>, <code>apply</code>, <code>test</code>, <code>lint</code> (comma, space or newline separated). Use `all`` to run all steps.</p> | `false` | `all` |
 | `tfvar-files` | <p>Comma, space or newline separated list of tfvar files to include</p> | `false` | `""` |
@@ -71,11 +71,11 @@ Workflow summaries are automatically updated from the different stages, this mak
 
 <!-- action-docs-outputs source="action.yml" -->
 
-<!-- action-docs-usage action="action.yml" project="coresolutionsltd/tf-github-action" version="main" -->
+<!-- action-docs-usage action="action.yml" project="coresolutionsltd/tofu-github-action" version="main" -->
 ## Usage
 
 ```yaml
-- uses: coresolutionsltd/tf-github-action@main
+- uses: coresolutionsltd/tofu-github-action@main
   with:
     version:
     # The OpenTofu version to install (e.g., 1.11.x).
@@ -84,7 +84,7 @@ Workflow summaries are automatically updated from the different stages, this mak
     # Default: 1.11.x
 
     workdir:
-    # Path to the TF configuration directory (relative to repository root).
+    # Path to the Tofu configuration directory (relative to repository root).
     #
     # Required: false
     # Default: .
@@ -203,7 +203,7 @@ Workflow summaries are automatically updated from the different stages, this mak
     # Required: false
     # Default: tf-github-action
 ```
-<!-- action-docs-usage action="action.yml" project="coresolutionsltd/tf-github-action" version="main" -->
+<!-- action-docs-usage action="action.yml" project="coresolutionsltd/tofu-github-action" version="main" -->
 
 ## Permissions
 
@@ -230,7 +230,7 @@ For supply-chain hardening, consider pinning third-party actions to commit SHAs.
 
 ## Usage Examples
 
-This section provides examples of how to use the TF GitHub Action in various scenarios, from simple validation to multi-environment deployments with approval gates.
+This section provides examples of how to use the Tofu GitHub Action in various scenarios, from simple validation to multi-environment deployments with approval gates.
 
 ### Basic Usage
 
@@ -252,7 +252,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Validate Configuration
-        uses: coresolutionsltd/tf-github-action@main
+        uses: coresolutionsltd/tofu-github-action@main
         with:
           workdir: ./infra
           steps: validate
@@ -276,7 +276,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Plan Changes
-        uses: coresolutionsltd/tf-github-action@main
+        uses: coresolutionsltd/tofu-github-action@main
         with:
           workdir: ./infra
           steps: plan
@@ -301,7 +301,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Deploy to Development Environment
-        uses: coresolutionsltd/tf-github-action@main
+        uses: coresolutionsltd/tofu-github-action@main
         with:
           workdir: ./infra
           env: dev
@@ -315,7 +315,7 @@ Load multiple variable files to configure your infrastructure with shared and en
 
 ```yaml
 - name: Deploy with Multiple Variable Files
-  uses: coresolutionsltd/tf-github-action@main
+  uses: coresolutionsltd/tofu-github-action@main
   with:
     workdir: ./infra
     env: dev
@@ -329,7 +329,7 @@ Pass variables directly in the workflow for simple configurations or dynamic val
 
 ```yaml
 - name: Deploy with Inline Variables
-  uses: coresolutionsltd/tf-github-action@main
+  uses: coresolutionsltd/tofu-github-action@main
   with:
     workdir: ./infra
     env: dev
@@ -345,7 +345,7 @@ Combine variable files and inline variables for maximum flexibility.
 
 ```yaml
 - name: Deploy with Mixed Variable Sources
-  uses: coresolutionsltd/tf-github-action@main
+  uses: coresolutionsltd/tofu-github-action@main
   with:
     workdir: ./infra
     env: dev
@@ -365,7 +365,7 @@ Use configuration files to manage remote state across different environments.
 
 ```yaml
 - name: Initialize with Backend Configuration Files
-  uses: coresolutionsltd/tf-github-action@main
+  uses: coresolutionsltd/tofu-github-action@main
   with:
     workdir: ./infra
     env: staging
@@ -378,7 +378,7 @@ Configure remote state directly in the workflow for dynamic setups.
 
 ```yaml
 - name: Configure Remote State Inline
-  uses: coresolutionsltd/tf-github-action@main
+  uses: coresolutionsltd/tofu-github-action@main
   with:
     workdir: ./infra
     backend-config-vars: |
@@ -413,7 +413,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Plan Production Changes
-        uses: coresolutionsltd/tf-github-action@main
+        uses: coresolutionsltd/tofu-github-action@main
         with:
           workdir: ./infra
           env: prod
@@ -430,7 +430,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Apply Production Changes
-        uses: coresolutionsltd/tf-github-action@main
+        uses: coresolutionsltd/tofu-github-action@main
         with:
           workdir: ./infra
           env: prod  # env must match what is planned
@@ -446,7 +446,7 @@ Control PR comments and redact plan/apply output in summaries.
 
 ```yaml
 - name: Plan with redacted summaries and no PR comment
-  uses: coresolutionsltd/tf-github-action@main
+  uses: coresolutionsltd/tofu-github-action@main
   with:
     workdir: ./infra
     steps: plan
@@ -463,7 +463,7 @@ Linting runs `tflint` against `workdir`. If a `.tflint.hcl` config exists in the
 
 ```yaml
 - name: Lint with TFLint
-  uses: coresolutionsltd/tf-github-action@main
+  uses: coresolutionsltd/tofu-github-action@main
   with:
     workdir: ./infra
     steps: lint
@@ -490,14 +490,14 @@ If the test directory is missing or contains no `.tftest.hcl` files, the action 
 
 ```yaml
 - name: Run unit tests
-  uses: coresolutionsltd/tf-github-action@main
+  uses: coresolutionsltd/tofu-github-action@main
   with:
     workdir: ./infra
     steps: test
     test-dir: tests/unit
 
 - name: Run integration tests
-  uses: coresolutionsltd/tf-github-action@main
+  uses: coresolutionsltd/tofu-github-action@main
   with:
     workdir: ./infra
     steps: test

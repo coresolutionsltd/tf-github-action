@@ -1,5 +1,5 @@
 
-# TF GitHub Action Makefile
+# Tofu GitHub Action Makefile
 # Auto-generates documentation and provides common development tasks
 
 .PHONY: all

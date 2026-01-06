@@ -1,4 +1,4 @@
-name: TF GitHub Action
+name: Tofu GitHub Action
 description: This action will validate, plan and apply your OpenTofu configuration.
 
 branding:
@@ -11,7 +11,7 @@ inputs:
     required: false
     default: "1.11.x"
   workdir:
-    description: "Path to the TF configuration directory (relative to repository root)."
+    description: "Path to the Tofu configuration directory (relative to repository root)."
     required: false
     default: "."
   env:
@@ -503,7 +503,7 @@ runs:
 
         if [ -z "$FMT_SUMMARY" ]; then
           echo "fmt_failed=false" >> $GITHUB_OUTPUT
-          VALIDATION_SUMMARY+="| 🎯 Format | ✅ Pass | All files are properly formatted |
+          VALIDATION_SUMMARY+="| 🎯 Tofu Format | ✅ Pass | All files are properly formatted |
           "
         else
           # Output fmt failure flag
@@ -513,7 +513,7 @@ runs:
           # Output fmt summary
           printf 'fmt_summary=%s\n' "$FMT_SUMMARY" >> "$GITHUB_OUTPUT"
 
-          VALIDATION_SUMMARY+="| 🎯 Format | ❌ Fail | \`$FMT_SUMMARY\` |
+          VALIDATION_SUMMARY+="| 🎯 Tofu Format | ❌ Fail | \`$FMT_SUMMARY\` |
           "
           VALIDATION_ERRORS+="### 🎯 Format Issues
           Format validation has failed on the following files: **$FMT_SUMMARY**
@@ -532,7 +532,7 @@ runs:
 
         if [ "$IS_VALID" = "true" ]; then
           echo "validate_failed=false" >> $GITHUB_OUTPUT
-          VALIDATION_SUMMARY+="| 🔍 Validate | ✅ Pass | Configuration is valid |
+          VALIDATION_SUMMARY+="| 🔍 Tofu Validate | ✅ Pass | Configuration is valid |
           "
         else
           echo "validate_failed=true" >> $GITHUB_OUTPUT
@@ -593,7 +593,7 @@ runs:
             "# \n"
           ')
 
-          VALIDATION_SUMMARY+="| 🎯 Validate | ❌ Fail | $VALIDATE_SUMMARY |
+          VALIDATION_SUMMARY+="| 🔍 Tofu Validate | ❌ Fail | $VALIDATE_SUMMARY |
           "
 
           # Output validate summary
@@ -611,7 +611,7 @@ runs:
 
         if [ "$SUMMARY_MODE" = "full" ]; then
           {
-            printf '%s\n' "## 🧪 Validate" "" "$VALIDATION_SUMMARY" "" "$VALIDATION_ERRORS"
+            printf '%s\n' "## 🧪 Tofu Validate" "" "$VALIDATION_SUMMARY" "" "$VALIDATION_ERRORS"
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
           FMT_STATUS="✅ Pass"
@@ -631,7 +631,7 @@ runs:
             "| 🔍 Tofu Validate | $VALIDATE_STATUS | Details redacted |" \
           )
           {
-            printf '%s\n' "## 🧪 Validate" "" "$REDACTED_SUMMARY" ""
+            printf '%s\n' "## 🧪 Tofu Validate" "" "$REDACTED_SUMMARY" ""
           } >> "$GITHUB_STEP_SUMMARY"
         fi
 
@@ -697,9 +697,9 @@ runs:
           LINT_EXIT=$INIT_EXIT
         fi
 
-        LINT_ISSUE_COUNT=$( { grep -Eo '[0-9]+ issue\\(s\\) found' lint_output.txt | head -1 | awk '{print $1}'; } || true)
-        if [ -z "$LINT_ISSUE_COUNT" ]; then
-          LINT_ISSUE_COUNT=$( { grep -E ":[0-9]+:[0-9]+: (Warning|Error|Notice) -" lint_output.txt | wc -l | tr -d ' '; } || true)
+        LINT_ISSUE_COUNT=$( { grep -Eo '[0-9]+ (issue|issues)\\(s\\)? found' lint_output.txt | head -1 | awk '{print $1}'; } || true)
+        if [ -z "$LINT_ISSUE_COUNT" ] || [ "$LINT_ISSUE_COUNT" -eq 0 ]; then
+          LINT_ISSUE_COUNT=$( { grep -E '^(Warning|Error|Notice):' lint_output.txt | wc -l | tr -d ' '; } || true)
         fi
         if [ -z "$LINT_ISSUE_COUNT" ]; then
           LINT_ISSUE_COUNT=0
@@ -745,7 +745,7 @@ runs:
 
         if [ "$SUMMARY_MODE" = "full" ]; then
           {
-            printf '%s\n' "## 🧹 Lint" "" \
+            printf '%s\n' "## 🧹 Tofu Lint" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧹 TFLint | $LINT_SUMMARY_STATUS | $LINT_DETAILS |" \
@@ -755,7 +755,7 @@ runs:
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
           {
-            printf '%s\n' "## 🧹 Lint" "" \
+            printf '%s\n' "## 🧹 Tofu Lint" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧹 TFLint | $LINT_SUMMARY_STATUS | $LINT_DETAILS |" \
@@ -849,7 +849,7 @@ runs:
 
         if [ "$SUMMARY_MODE" = "full" ]; then
           {
-            printf '%s\n' "## 🧪 Test" "" \
+            printf '%s\n' "## 🧪 Tofu Test" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧪 $TEST_DIR_LABEL | $TEST_SUMMARY_STATUS | $TEST_DETAILS |" \
@@ -857,7 +857,7 @@ runs:
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
           {
-            printf '%s\n' "## 🧪 Test" "" \
+            printf '%s\n' "## 🧪 Tofu Test" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧪 $TEST_DIR_LABEL | $TEST_SUMMARY_STATUS | Details redacted |" \
@@ -1044,7 +1044,7 @@ runs:
           ];
 
           let checksSummary = `${commentMarker}
-          ### 🧪 TF Checks
+          ### 🧪 Tofu Checks
           ${tableLines.join('\n')}`;
 
           const anyFail = Object.values(rows).some(row => row.status.includes('❌'));
@@ -1188,7 +1188,7 @@ runs:
 
         if [ "$SUMMARY_MODE" != "off" ]; then
           cat << PLAN_EOF >> "$GITHUB_STEP_SUMMARY"
-        ## 🏗️ Plan
+        ## 🏗️ Tofu Plan
 
         | Action | Count |
         |--------|-------|
@@ -1237,7 +1237,7 @@ runs:
           const planComment = comments.find(comment => {
             return comment.body && comment.body.includes(commentMarker)
           }) || comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes('TF Plan Summary')
+            return comment.user.type === 'Bot' && comment.body.includes('Tofu Plan')
           })
           const hasChanges = '${{ steps.plan.outputs.has_changes }}' === 'true';
           const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
@@ -1254,7 +1254,7 @@ runs:
 
           if (hasChanges) {
             plan = `${commentMarker}
-            ### 🏗️ TF Plan Summary
+            ### 🏗️ Tofu Plan
             ${summaryTable}
             `;
             if (summaryMode === 'full') {
@@ -1262,7 +1262,7 @@ runs:
             }
           } else {
             plan = `${commentMarker}
-            #### 🏗️ TF Plan Summary
+            #### 🏗️ Tofu Plan
             ${summaryTable}
 
             \`\`\`hcl
@@ -1414,7 +1414,7 @@ runs:
 
         if [ "$SUMMARY_MODE" != "off" ]; then
           cat << APPLY_EOF >> "$GITHUB_STEP_SUMMARY"
-        ## 🚀 Apply
+        ## 🚀 Tofu Apply
 
         ### Summary
         **Resources:** ${ADDED} added, ${CHANGED} changed, ${DESTROYED} destroyed
@@ -1460,7 +1460,7 @@ runs:
           const applyComment = comments.find(comment => {
             return comment.body && comment.body.includes(commentMarker)
           }) || comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes('TF Apply Summary')
+            return comment.user.type === 'Bot' && comment.body.includes('Tofu Apply')
           })
           const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
@@ -1471,7 +1471,7 @@ runs:
           const forgotten = Number('${{ steps.apply.outputs.forgotten }}' || 0);
 
           let applySummary = `${commentMarker}
-          ### 🚀 TF Apply Summary
+          ### 🚀 Tofu Apply
           **Resources:** ${added} added, ${changed} changed, ${destroyed} destroyed
           ${imported > 0 ? `**Imported:** ${imported}` : ''}
           ${forgotten > 0 ? `**Forgotten:** ${forgotten}` : ''}
