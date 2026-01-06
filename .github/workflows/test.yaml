@@ -212,8 +212,8 @@ jobs:
             echo "✅ Empty config validation passed"
           fi
 
-  plan-summary-modes:
-    name: Plan Summary Modes (${{ matrix.summary-mode }})
+  summary-modes-plan-apply:
+    name: Summary Modes (Plan+Apply, ${{ matrix.summary-mode }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -225,12 +225,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Plan with summary mode
+      - name: Plan and apply with summary mode
         uses: ./
         with:
           workdir: test/valid
           env: summary-${{ matrix.summary-mode }}
-          steps: plan
+          steps: plan,apply
           summary-mode: ${{ matrix.summary-mode }}
           comment-mode: off
+          skip-plan-upload: true
+
+  pr-comment-smoke:
+    name: PR Comment Smoke (Validate/Plan/Apply)
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run action with PR comments
+        uses: ./
+        with:
+          workdir: test/valid
+          env: pr-comment
+          steps: validate,plan,apply
+          comment-mode: sticky
+          comment-identifier: tf-github-action
+          summary-mode: redacted
           skip-plan-upload: true

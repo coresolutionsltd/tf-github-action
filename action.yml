@@ -510,7 +510,9 @@ runs:
           const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
           const commentMarker = `<!-- ${commentIdentifier}:validate -->`;
           const validationComment = comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes(commentMarker)
+            return comment.body && comment.body.includes(commentMarker)
+          }) || comments.find(comment => {
+            return comment.user.type === 'Bot' && comment.body.includes('TF Validate Results')
           })
           const hasFailures = ${{ steps.validate.outputs.has_failures }};
           const fmtFailed = ${{ steps.validate.outputs.fmt_failed }};
@@ -676,7 +678,9 @@ runs:
           const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
           const commentMarker = `<!-- ${commentIdentifier}:plan -->`;
           const planComment = comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes(commentMarker)
+            return comment.body && comment.body.includes(commentMarker)
+          }) || comments.find(comment => {
+            return comment.user.type === 'Bot' && comment.body.includes('TF Plan Summary')
           })
           const hasChanges = ${{ steps.plan.outputs.has_changes }};
 
@@ -895,7 +899,9 @@ runs:
           const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
           const commentMarker = `<!-- ${commentIdentifier}:apply -->`;
           const applyComment = comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes(commentMarker)
+            return comment.body && comment.body.includes(commentMarker)
+          }) || comments.find(comment => {
+            return comment.user.type === 'Bot' && comment.body.includes('TF Apply Summary')
           })
 
           const added = ${{ steps.apply.outputs.added }};
