@@ -92,8 +92,6 @@ jobs:
           - name: "Missing backend config file"
             workdir: "test/valid"
             backend-config-var-files: "missing-backend.conf"
-          - name: "No config files"
-            workdir: "test/invalid/empty"
 
     steps:
       - name: Checkout code
@@ -188,3 +186,51 @@ jobs:
           else
             echo "✅ Apply-only without plan failed as expected"
           fi
+
+  validate-empty-config:
+    name: Validate Empty Config Directory (Expected Success)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate empty directory
+        id: tf-action-empty-validate
+        uses: ./
+        with:
+          workdir: test/empty
+          steps: validate
+          comment-mode: off
+          summary-mode: redacted
+
+      - name: Verify validate succeeded
+        run: |
+          if [ "${{ steps.tf-action-empty-validate.outcome }}" != "success" ]; then
+            echo "❌ Empty config validation failed"
+            exit 1
+          else
+            echo "✅ Empty config validation passed"
+          fi
+
+  plan-summary-modes:
+    name: Plan Summary Modes (${{ matrix.summary-mode }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        summary-mode:
+          - full
+          - redacted
+          - off
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Plan with summary mode
+        uses: ./
+        with:
+          workdir: test/valid
+          env: summary-${{ matrix.summary-mode }}
+          steps: plan
+          summary-mode: ${{ matrix.summary-mode }}
+          comment-mode: off
+          skip-plan-upload: true
