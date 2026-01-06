@@ -253,7 +253,7 @@ jobs:
         with:
           workdir: ${{ matrix.case.workdir }}
           steps: lint
-          comment-mode: off
+          comment-mode: ${{ matrix.case.expect_failure && 'off' || 'sticky' }}
           summary-mode: full
           skip-plan-upload: true
 

@@ -615,20 +615,24 @@ runs:
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
           FMT_STATUS="✅ Pass"
+          FMT_DETAIL="All files are properly formatted"
           if [ -n "$FMT_SUMMARY" ]; then
             FMT_STATUS="❌ Fail"
+            FMT_DETAIL="\`$FMT_SUMMARY\`"
           fi
 
           VALIDATE_STATUS="✅ Pass"
+          VALIDATE_DETAIL="Configuration is valid"
           if [ "$IS_VALID" != "true" ]; then
             VALIDATE_STATUS="❌ Fail"
+            VALIDATE_DETAIL="$VALIDATE_SUMMARY"
           fi
 
           REDACTED_SUMMARY=$(printf '%s\n' \
             '| Check | Status | Details |' \
             '|-------|--------|---------|' \
-            "| 🎯 Tofu Format | $FMT_STATUS | Details redacted |" \
-            "| 🔍 Tofu Validate | $VALIDATE_STATUS | Details redacted |" \
+            "| 🎯 Tofu Format | $FMT_STATUS | $FMT_DETAIL |" \
+            "| 🔍 Tofu Validate | $VALIDATE_STATUS | $VALIDATE_DETAIL |" \
           )
           {
             printf '%s\n' "## 🧪 Tofu Validate" "" "$REDACTED_SUMMARY" ""
