@@ -649,9 +649,6 @@ runs:
         PLAN_DETAIL_EOF
           elif [ "$SUMMARY_MODE" = "redacted" ]; then
             cat << PLAN_DETAIL_EOF >> "$GITHUB_STEP_SUMMARY"
-        Plan output redacted.
-        ---
-
         PLAN_DETAIL_EOF
           fi
         fi
