@@ -235,6 +235,23 @@ jobs:
           comment-mode: off
           skip-plan-upload: true
 
+  tflint:
+    name: TFLint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run TFLint
+        uses: ./
+        with:
+          workdir: test/valid
+          steps: lint
+          comment-mode: sticky
+          comment-identifier: tf-github-action
+          summary-mode: redacted
+          skip-plan-upload: true
+
   tofu-test-unit:
     name: OpenTofu Test (Unit)
     runs-on: ubuntu-latest
