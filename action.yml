@@ -758,14 +758,20 @@ runs:
           })
           const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
           const testDir = `${{ inputs['test-dir'] }}` || 'tests';
-          const commentMarker = `<!-- ${commentIdentifier}:test:${testDir} -->`;
+          const commentMarker = `<!-- ${commentIdentifier}:test -->`;
           const testComment = comments.find(comment => {
             return comment.body && comment.body.includes(commentMarker)
+          }) || comments.find(comment => {
+            return comment.body && comment.body.includes('TF Test Results')
           })
 
           const testRan = ${{ steps.test.outputs.test_ran }};
           const testSkipped = ${{ steps.test.outputs.test_skipped }};
           const testFailed = ${{ steps.test.outputs.test_failed }};
+
+          const checkName = (testDir.split('/').filter(Boolean).pop() || 'Tests')
+            .replace(/[-_]/g, ' ')
+            .replace(/\b\w/g, c => c.toUpperCase());
 
           let status = '⚠️ Skipped';
           let details = `No OpenTofu tests were executed in \`${testDir}\`.`;
@@ -782,11 +788,52 @@ runs:
             details = `No OpenTofu tests were executed in \`${testDir}\`.`;
           }
 
-          const testSummary = `${commentMarker}
-          ### 🧪 TF Test Results (${testDir})
-          | Check | Status | Details |
-          |-------|--------|---------|
-          | 🧪 Tests | ${status} | ${details} |`;
+          const rows = {};
+
+          if (testComment && testComment.body) {
+            const lines = testComment.body.split('\n');
+            for (const line of lines) {
+              if (!line.trim().startsWith('|')) {
+                continue;
+              }
+              const cells = line.split('|').map(cell => cell.trim()).filter(Boolean);
+              if (cells.length < 3) {
+                continue;
+              }
+              const [check, rowStatus, rowDetails] = cells;
+              if (check === 'Check' || check === '-------') {
+                continue;
+              }
+              rows[check] = { status: rowStatus, details: rowDetails };
+            }
+          }
+
+          rows[checkName] = { status, details };
+
+          const preferredOrder = ['Unit', 'Integration'];
+          const orderedChecks = [
+            ...preferredOrder.filter(name => rows[name]),
+            ...Object.keys(rows).filter(name => !preferredOrder.includes(name)).sort(),
+          ];
+
+          const tableLines = [
+            '| Check | Status | Details |',
+            '|-------|--------|---------|',
+            ...orderedChecks.map(name => {
+              const row = rows[name];
+              return `| ${name} | ${row.status} | ${row.details} |`;
+            }),
+          ];
+
+          let testSummary = `${commentMarker}
+          ### 🧪 TF Test Results
+          ${tableLines.join('\n')}`;
+
+          const anyFail = Object.values(rows).some(row => row.status.includes('❌'));
+          const anySkip = Object.values(rows).some(row => row.status.includes('⚠️'));
+          if (!anyFail && !anySkip && Object.keys(rows).length > 0) {
+            testSummary += `\n\nAll tests passed! 🎉`;
+          }
 
           if (testComment) {
             github.rest.issues.updateComment({
