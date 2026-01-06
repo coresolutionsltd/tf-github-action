@@ -66,7 +66,6 @@ jobs:
           env: ${{ matrix.test-case.env }}
           steps: validate,plan,apply
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify action succeeded
         run: |
@@ -106,7 +105,6 @@ jobs:
           backend-config-var-files: ${{ matrix.test-case.backend-config-var-files }}
           steps: validate
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify action failed as expected
         run: |
@@ -131,7 +129,6 @@ jobs:
           env: apply-artifact
           steps: plan
           comment-mode: off
-          summary-mode: redacted
 
   apply-only-with-plan:
     name: Apply Only Using Existing Plan Artifact
@@ -149,7 +146,6 @@ jobs:
           env: apply-artifact
           steps: apply
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify apply succeeded
         run: |
@@ -176,7 +172,6 @@ jobs:
           env: missing-plan
           steps: apply
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify apply failed as expected
         run: |
@@ -201,7 +196,6 @@ jobs:
           workdir: test/empty
           steps: validate
           comment-mode: off
-          summary-mode: redacted
 
       - name: Verify validate succeeded
         run: |
@@ -247,9 +241,6 @@ jobs:
         with:
           workdir: test/valid
           steps: lint
-          comment-mode: sticky
-          comment-identifier: tf-github-action
-          summary-mode: redacted
           skip-plan-upload: true
 
   tofu-test-unit:
@@ -265,9 +256,6 @@ jobs:
           workdir: test/valid
           steps: test
           test-dir: tests/unit
-          comment-mode: sticky
-          comment-identifier: tf-github-action
-          summary-mode: redacted
           skip-plan-upload: true
 
   tofu-test-integration:
@@ -283,9 +271,6 @@ jobs:
           workdir: test/valid
           steps: test
           test-dir: tests/integration
-          comment-mode: sticky
-          comment-identifier: tf-github-action
-          summary-mode: redacted
           skip-plan-upload: true
 
   pr-comment-smoke:
@@ -302,7 +287,5 @@ jobs:
           workdir: test/valid
           env: pr-comment
           steps: validate,plan,apply
-          comment-mode: sticky
-          comment-identifier: tf-github-action
           summary-mode: redacted
           skip-plan-upload: true

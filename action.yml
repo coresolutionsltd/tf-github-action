@@ -750,6 +750,11 @@ runs:
         esac
 
         TEST_DIR="${{ inputs['test-dir'] }}"
+        TEST_DIR_LABEL=$(basename "$TEST_DIR")
+        TEST_DIR_LABEL=$(echo "$TEST_DIR_LABEL" | tr '-_' ' ' | awk '{for (i=1; i<=NF; i++) { $i = toupper(substr($i,1,1)) substr($i,2) } print }')
+        if [ -z "$TEST_DIR_LABEL" ]; then
+          TEST_DIR_LABEL="Tests"
+        fi
         TEST_TFVAR_FILE_ARGS="${{ steps.parse-test-tfvar-files.outputs.test-tfvar-file-args }}"
         TEST_TFVAR_ARGS="${{ steps.parse-test-tfvars.outputs.test-tfvar-args }}"
 
@@ -810,7 +815,7 @@ runs:
             printf '%s\n' "## 🧪 Test" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
-              "| 🧪 Tests | $TEST_SUMMARY_STATUS | $TEST_DETAILS |" \
+              "| 🧪 $TEST_DIR_LABEL | $TEST_SUMMARY_STATUS | $TEST_DETAILS |" \
               ""
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
@@ -818,7 +823,7 @@ runs:
             printf '%s\n' "## 🧪 Test" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
-              "| 🧪 Tests | $TEST_SUMMARY_STATUS | Details redacted |" \
+              "| 🧪 $TEST_DIR_LABEL | $TEST_SUMMARY_STATUS | Details redacted |" \
               ""
           } >> "$GITHUB_STEP_SUMMARY"
         fi
@@ -847,6 +852,10 @@ runs:
 
           const rows = {};
 
+          const runValidate = '${{ steps.parse-steps.outputs.run_validate }}' === 'true';
+          const runLint = '${{ steps.parse-steps.outputs.run_lint }}' === 'true';
+          const runTest = '${{ steps.parse-steps.outputs.run_test }}' === 'true';
+
           if (checksComment && checksComment.body) {
             const lines = checksComment.body.split('\n');
             for (const line of lines) {
@@ -865,9 +874,9 @@ runs:
             }
           }
 
-          if (${{ steps.parse-steps.outputs.run_validate == 'true' }}) {
-            const fmtFailed = ${{ steps.validate.outputs.fmt_failed }};
-            const validateFailed = ${{ steps.validate.outputs.validate_failed }};
+          if (runValidate) {
+            const fmtFailed = '${{ steps.validate.outputs.fmt_failed }}' === 'true';
+            const validateFailed = '${{ steps.validate.outputs.validate_failed }}' === 'true';
             const fmtSummary = `${{ steps.validate.outputs.fmt_summary }}`;
             const validateSummary = `${{ steps.validate.outputs.validate_summary }}`;
 
@@ -881,10 +890,10 @@ runs:
             };
           }
 
-          if (${{ steps.parse-steps.outputs.run_lint == 'true' }}) {
-            const lintRan = ${{ steps.lint.outputs.lint_ran }};
-            const lintSkipped = ${{ steps.lint.outputs.lint_skipped }};
-            const lintFailed = ${{ steps.lint.outputs.lint_failed }};
+          if (runLint) {
+            const lintRan = '${{ steps.lint.outputs.lint_ran }}' === 'true';
+            const lintSkipped = '${{ steps.lint.outputs.lint_skipped }}' === 'true';
+            const lintFailed = '${{ steps.lint.outputs.lint_failed }}' === 'true';
             const lintDetails = `${{ steps.lint.outputs.lint_details }}`;
 
             let status = '⚠️ Skipped';
@@ -900,16 +909,16 @@ runs:
             rows['🧹 TFLint'] = { status, details };
           }
 
-          if (${{ steps.parse-steps.outputs.run_test == 'true' }}) {
+          if (runTest) {
             const testDir = `${{ inputs['test-dir'] }}` || 'tests';
             const dirLabel = (testDir.split('/').filter(Boolean).pop() || 'Tests')
               .replace(/[-_]/g, ' ')
               .replace(/\b\w/g, c => c.toUpperCase());
             const checkName = `🧪 Tofu Test (${dirLabel})`;
 
-            const testRan = ${{ steps.test.outputs.test_ran }};
-            const testSkipped = ${{ steps.test.outputs.test_skipped }};
-            const testFailed = ${{ steps.test.outputs.test_failed }};
+            const testRan = '${{ steps.test.outputs.test_ran }}' === 'true';
+            const testSkipped = '${{ steps.test.outputs.test_skipped }}' === 'true';
+            const testFailed = '${{ steps.test.outputs.test_failed }}' === 'true';
 
             let status = '⚠️ Skipped';
             let details = `No OpenTofu tests were executed in \`${testDir}\`.`;
@@ -1109,7 +1118,7 @@ runs:
           }) || comments.find(comment => {
             return comment.user.type === 'Bot' && comment.body.includes('TF Plan Summary')
           })
-          const hasChanges = ${{ steps.plan.outputs.has_changes }};
+          const hasChanges = '${{ steps.plan.outputs.has_changes }}' === 'true';
           const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
           const summaryTable = `
@@ -1334,11 +1343,11 @@ runs:
           })
           const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
-          const added = ${{ steps.apply.outputs.added }};
-          const changed = ${{ steps.apply.outputs.changed }};
-          const destroyed = ${{ steps.apply.outputs.destroyed }};
-          const imported = ${{ steps.apply.outputs.imported }};
-          const forgotten = ${{ steps.apply.outputs.forgotten }};
+          const added = Number('${{ steps.apply.outputs.added }}' || 0);
+          const changed = Number('${{ steps.apply.outputs.changed }}' || 0);
+          const destroyed = Number('${{ steps.apply.outputs.destroyed }}' || 0);
+          const imported = Number('${{ steps.apply.outputs.imported }}' || 0);
+          const forgotten = Number('${{ steps.apply.outputs.forgotten }}' || 0);
 
           let applySummary = `${commentMarker}
           ### 🚀 TF Apply Summary
