@@ -628,31 +628,31 @@ runs:
         fi
 
         if [ "$SUMMARY_MODE" != "off" ]; then
-          cat >> $GITHUB_STEP_SUMMARY << PLAN_EOF
-          ## 🏗️ Plan
+          cat << PLAN_EOF >> "$GITHUB_STEP_SUMMARY"
+        ## 🏗️ Plan
 
-          | Action | Count |
-          |--------|-------|
-          | ➕ Create | $CREATE_COUNT |
-          | 🔄 Update | $UPDATE_COUNT |
-          | ❌ Destroy | $DESTROY_COUNT |
+        | Action | Count |
+        |--------|-------|
+        | ➕ Create | $CREATE_COUNT |
+        | 🔄 Update | $UPDATE_COUNT |
+        | ❌ Destroy | $DESTROY_COUNT |
 
-          PLAN_EOF
+        PLAN_EOF
 
           if [ "$SUMMARY_MODE" = "full" ]; then
-            cat >> $GITHUB_STEP_SUMMARY << PLAN_DETAIL_EOF
-          \`\`\`hcl
-          $PLAN
-          \`\`\`
-          ---
+            cat << PLAN_DETAIL_EOF >> "$GITHUB_STEP_SUMMARY"
+        \`\`\`hcl
+        $PLAN
+        \`\`\`
+        ---
 
-          PLAN_DETAIL_EOF
+        PLAN_DETAIL_EOF
           elif [ "$SUMMARY_MODE" = "redacted" ]; then
-            cat >> $GITHUB_STEP_SUMMARY << PLAN_DETAIL_EOF
-          Plan output redacted.
-          ---
+            cat << PLAN_DETAIL_EOF >> "$GITHUB_STEP_SUMMARY"
+        Plan output redacted.
+        ---
 
-          PLAN_DETAIL_EOF
+        PLAN_DETAIL_EOF
           fi
         fi
 
@@ -853,21 +853,21 @@ runs:
         fi
 
         if [ "$SUMMARY_MODE" != "off" ]; then
-          cat >> $GITHUB_STEP_SUMMARY << APPLY_EOF
-          ## 🚀 Apply
+          cat << APPLY_EOF >> "$GITHUB_STEP_SUMMARY"
+        ## 🚀 Apply
 
-          ### Summary
-          **Resources:** ${ADDED} added, ${CHANGED} changed, ${DESTROYED} destroyed
+        ### Summary
+        **Resources:** ${ADDED} added, ${CHANGED} changed, ${DESTROYED} destroyed
 
-          $(if [ ${IMPORTED} -gt 0 ]; then echo "**Imported:** ${IMPORTED}"; fi)
-          $(if [ ${FORGOTTEN} -gt 0 ]; then echo "**Forgotten:** ${FORGOTTEN}"; fi)
+        $(if [ ${IMPORTED} -gt 0 ]; then echo "**Imported:** ${IMPORTED}"; fi)
+        $(if [ ${FORGOTTEN} -gt 0 ]; then echo "**Forgotten:** ${FORGOTTEN}"; fi)
 
-          ### Resource Changes
-          ${RESOURCE_CHANGES}
+        ### Resource Changes
+        ${RESOURCE_CHANGES}
 
-          ### Outputs
-          ${OUTPUTS}
-          APPLY_EOF
+        ### Outputs
+        ${OUTPUTS}
+        APPLY_EOF
         fi
 
         echo "added=${ADDED:-0}" >> $GITHUB_OUTPUT
