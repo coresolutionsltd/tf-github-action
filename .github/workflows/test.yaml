@@ -8,6 +8,7 @@ on:
 
 permissions:
   id-token: write
+  actions: write
   contents: read
   pull-requests: write
 
@@ -64,6 +65,8 @@ jobs:
           backend-config-vars: ${{ matrix.test-case.backend-config-vars }}
           env: ${{ matrix.test-case.env }}
           steps: validate,plan,apply
+          comment-mode: off
+          summary-mode: redacted
 
       - name: Verify action succeeded
         run: |
@@ -104,6 +107,8 @@ jobs:
           workdir: ${{ matrix.test-case.workdir }}
           backend-config-var-files: ${{ matrix.test-case.backend-config-var-files }}
           steps: validate
+          comment-mode: off
+          summary-mode: redacted
 
       - name: Verify action failed as expected
         run: |
@@ -114,35 +119,39 @@ jobs:
             echo "✅ Test passed: Action correctly failed for ${{ matrix.test-case.name }}"
           fi
 
-  plan-for-apply:
-    name: Plan for Apply Only
+  plan-artifact:
+    name: Plan Artifact for Apply-Only Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create plan artifact
+      - name: Create plan artifact for apply-only
         uses: ./
         with:
           workdir: test/valid
-          env: apply-only
+          env: apply-artifact
           steps: plan
+          comment-mode: off
+          summary-mode: redacted
 
   apply-only-with-plan:
-    name: Apply Only With Plan Artifact
+    name: Apply Only Using Existing Plan Artifact
     runs-on: ubuntu-latest
-    needs: plan-for-apply
+    needs: plan-artifact
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Apply with plan artifact
+      - name: Apply using existing plan artifact
         id: tf-action-apply-only
         uses: ./
         with:
           workdir: test/valid
-          env: apply-only
+          env: apply-artifact
           steps: apply
+          comment-mode: off
+          summary-mode: redacted
 
       - name: Verify apply succeeded
         run: |
@@ -154,7 +163,7 @@ jobs:
           fi
 
   apply-only-without-plan:
-    name: Apply Only Without Plan Artifact
+    name: Apply Only Without Plan Artifact (Expected Failure)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -168,6 +177,8 @@ jobs:
           workdir: test/valid
           env: missing-plan
           steps: apply
+          comment-mode: off
+          summary-mode: redacted
 
       - name: Verify apply failed as expected
         run: |
