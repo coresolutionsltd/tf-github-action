@@ -683,6 +683,7 @@ runs:
             return comment.user.type === 'Bot' && comment.body.includes('TF Plan Summary')
           })
           const hasChanges = ${{ steps.plan.outputs.has_changes }};
+          const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
           const summaryTable = `
           | Action | Count |
@@ -698,9 +699,10 @@ runs:
             plan = `${commentMarker}
             ### 🏗️ TF Plan Summary
             ${summaryTable}
-
-            Full plan can be found in the [Plan Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
             `;
+            if (summaryMode === 'full') {
+              plan += `\nFull plan can be found in the [Plan Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+            }
           } else {
             plan = `${commentMarker}
             #### 🏗️ TF Plan Summary
@@ -903,6 +905,7 @@ runs:
           }) || comments.find(comment => {
             return comment.user.type === 'Bot' && comment.body.includes('TF Apply Summary')
           })
+          const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
           const added = ${{ steps.apply.outputs.added }};
           const changed = ${{ steps.apply.outputs.changed }};
@@ -915,8 +918,10 @@ runs:
           **Resources:** ${added} added, ${changed} changed, ${destroyed} destroyed
           ${imported > 0 ? `**Imported:** ${imported}` : ''}
           ${forgotten > 0 ? `**Forgotten:** ${forgotten}` : ''}
-
-          Full apply output can be found in the [Apply Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+          `;
+          if (summaryMode === 'full') {
+            applySummary += `\nFull apply output can be found in the [Apply Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+          }
 
           if (applyComment) {
             github.rest.issues.updateComment({
