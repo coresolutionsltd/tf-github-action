@@ -1325,7 +1325,7 @@ runs:
             elif $action == "update" then "updated"
             elif $action == "delete" then "destroyed"
             else $action end) + ")"
-          ' apply_output.json)
+          ' apply_output.json | awk 'NF && !seen[$0]++')
 
           if [ -z "$RESOURCE_CHANGES" ]; then
             RESOURCE_CHANGES="No changes"
