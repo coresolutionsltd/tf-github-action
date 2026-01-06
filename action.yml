@@ -680,14 +680,22 @@ runs:
           exit 0
         fi
 
+        INIT_EXIT=0
         if [ -n "$CONFIG_ARG" ]; then
+          set +e
           tflint $CONFIG_ARG --init
+          INIT_EXIT=$?
+          set -e
         fi
 
         set +e
         tflint $CONFIG_ARG > lint_output.txt 2>&1
         LINT_EXIT=$?
         set -e
+
+        if [ "$INIT_EXIT" -ne 0 ]; then
+          LINT_EXIT=$INIT_EXIT
+        fi
 
         if [ "$LINT_EXIT" -eq 0 ]; then
           LINT_STATUS="pass"
@@ -751,7 +759,9 @@ runs:
 
         TEST_DIR="${{ inputs['test-dir'] }}"
         TEST_DIR_LABEL=$(basename "$TEST_DIR")
-        TEST_DIR_LABEL=$(echo "$TEST_DIR_LABEL" | tr '-_' ' ' | awk '{for (i=1; i<=NF; i++) { $i = toupper(substr($i,1,1)) substr($i,2) } print }')
+        TEST_DIR_LABEL=${TEST_DIR_LABEL//_/ }
+        TEST_DIR_LABEL=${TEST_DIR_LABEL//-/ }
+        TEST_DIR_LABEL=$(echo "$TEST_DIR_LABEL" | awk '{for (i=1; i<=NF; i++) { $i = toupper(substr($i,1,1)) substr($i,2) } print }')
         if [ -z "$TEST_DIR_LABEL" ]; then
           TEST_DIR_LABEL="Tests"
         fi
@@ -875,35 +885,63 @@ runs:
           }
 
           if (runValidate) {
-            const fmtFailed = '${{ steps.validate.outputs.fmt_failed }}' === 'true';
-            const validateFailed = '${{ steps.validate.outputs.validate_failed }}' === 'true';
+            const fmtFailedOutput = `${{ steps.validate.outputs.fmt_failed }}`;
+            const validateFailedOutput = `${{ steps.validate.outputs.validate_failed }}`;
             const fmtSummary = `${{ steps.validate.outputs.fmt_summary }}`;
             const validateSummary = `${{ steps.validate.outputs.validate_summary }}`;
+            const validateOutcome = `${{ steps.validate.outcome }}`;
+            const validateOutputsPresent = fmtFailedOutput !== '' || validateFailedOutput !== '';
 
-            rows['🎯 Tofu Format'] = {
-              status: fmtFailed ? '❌ Fail' : '✅ Pass',
-              details: fmtFailed ? `\`${fmtSummary}\`` : 'All files are properly formatted',
-            };
-            rows['🔍 Tofu Validate'] = {
-              status: validateFailed ? '❌ Fail' : '✅ Pass',
-              details: validateFailed ? validateSummary : 'Configuration is valid',
-            };
+            if (!validateOutputsPresent && validateOutcome && validateOutcome !== 'success') {
+              rows['🎯 Tofu Format'] = {
+                status: '❌ Fail',
+                details: 'Validate step failed before reporting status.',
+              };
+              rows['🔍 Tofu Validate'] = {
+                status: '❌ Fail',
+                details: 'Validate step failed before reporting status.',
+              };
+            } else {
+              const fmtFailed = fmtFailedOutput === 'true';
+              const validateFailed = validateFailedOutput === 'true';
+
+              rows['🎯 Tofu Format'] = {
+                status: fmtFailed ? '❌ Fail' : '✅ Pass',
+                details: fmtFailed ? `\`${fmtSummary}\`` : 'All files are properly formatted',
+              };
+              rows['🔍 Tofu Validate'] = {
+                status: validateFailed ? '❌ Fail' : '✅ Pass',
+                details: validateFailed ? validateSummary : 'Configuration is valid',
+              };
+            }
           }
 
           if (runLint) {
-            const lintRan = '${{ steps.lint.outputs.lint_ran }}' === 'true';
-            const lintSkipped = '${{ steps.lint.outputs.lint_skipped }}' === 'true';
-            const lintFailed = '${{ steps.lint.outputs.lint_failed }}' === 'true';
+            const lintRanOutput = `${{ steps.lint.outputs.lint_ran }}`;
+            const lintSkippedOutput = `${{ steps.lint.outputs.lint_skipped }}`;
+            const lintFailedOutput = `${{ steps.lint.outputs.lint_failed }}`;
+            const lintStatusOutput = `${{ steps.lint.outputs.lint_status }}`;
             const lintDetails = `${{ steps.lint.outputs.lint_details }}`;
+            const lintOutcome = `${{ steps.lint.outcome }}`;
+            const lintOutputsPresent = lintStatusOutput !== '';
 
             let status = '⚠️ Skipped';
             let details = 'No Terraform/OpenTofu files to lint.';
 
-            if (lintRan) {
-              status = lintFailed ? '❌ Fail' : '✅ Pass';
-              details = lintDetails || (lintFailed ? 'TFLint reported issues.' : 'No issues found.');
-            } else if (lintSkipped) {
-              details = lintDetails || 'No Terraform/OpenTofu files to lint.';
+            if (!lintOutputsPresent && lintOutcome && lintOutcome !== 'success') {
+              status = '❌ Fail';
+              details = 'Lint step failed before reporting status.';
+            } else {
+              const lintRan = lintRanOutput === 'true';
+              const lintSkipped = lintSkippedOutput === 'true';
+              const lintFailed = lintFailedOutput === 'true';
+
+              if (lintRan) {
+                status = lintFailed ? '❌ Fail' : '✅ Pass';
+                details = lintDetails || (lintFailed ? 'TFLint reported issues.' : 'No issues found.');
+              } else if (lintSkipped) {
+                details = lintDetails || 'No Terraform/OpenTofu files to lint.';
+              }
             }
 
             rows['🧹 TFLint'] = { status, details };
@@ -916,18 +954,30 @@ runs:
               .replace(/\b\w/g, c => c.toUpperCase());
             const checkName = `🧪 Tofu Test (${dirLabel})`;
 
-            const testRan = '${{ steps.test.outputs.test_ran }}' === 'true';
-            const testSkipped = '${{ steps.test.outputs.test_skipped }}' === 'true';
-            const testFailed = '${{ steps.test.outputs.test_failed }}' === 'true';
+            const testRanOutput = `${{ steps.test.outputs.test_ran }}`;
+            const testSkippedOutput = `${{ steps.test.outputs.test_skipped }}`;
+            const testFailedOutput = `${{ steps.test.outputs.test_failed }}`;
+            const testStatusOutput = `${{ steps.test.outputs.test_status }}`;
+            const testOutcome = `${{ steps.test.outcome }}`;
+            const testOutputsPresent = testStatusOutput !== '';
 
             let status = '⚠️ Skipped';
             let details = `No OpenTofu tests were executed in \`${testDir}\`.`;
 
-            if (testRan) {
-              status = testFailed ? '❌ Fail' : '✅ Pass';
-              details = testFailed ? `OpenTofu tests failed in \`${testDir}\`.` : `All OpenTofu tests passed in \`${testDir}\`.`;
-            } else if (testSkipped) {
-              details = `No OpenTofu tests were executed in \`${testDir}\`.`;
+            if (!testOutputsPresent && testOutcome && testOutcome !== 'success') {
+              status = '❌ Fail';
+              details = `Test step failed before reporting status for \`${testDir}\`.`;
+            } else {
+              const testRan = testRanOutput === 'true';
+              const testSkipped = testSkippedOutput === 'true';
+              const testFailed = testFailedOutput === 'true';
+
+              if (testRan) {
+                status = testFailed ? '❌ Fail' : '✅ Pass';
+                details = testFailed ? `OpenTofu tests failed in \`${testDir}\`.` : `All OpenTofu tests passed in \`${testDir}\`.`;
+              } else if (testSkipped) {
+                details = `No OpenTofu tests were executed in \`${testDir}\`.`;
+              }
             }
 
             rows[checkName] = { status, details };
@@ -990,6 +1040,10 @@ runs:
         FAILURES=0
 
         if [[ "${{ steps.parse-steps.outputs.run_validate }}" == "true" ]]; then
+          if [[ "${{ steps.validate.outcome }}" != "success" ]]; then
+            echo "::error::Validate step failed before reporting status"
+            FAILURES=$((FAILURES + 1))
+          fi
           if [[ "${{ steps.validate.outputs.fmt_failed }}" == "true" ]]; then
             echo "::error::Format validation failed"
             FAILURES=$((FAILURES + 1))
@@ -1001,6 +1055,10 @@ runs:
         fi
 
         if [[ "${{ steps.parse-steps.outputs.run_lint }}" == "true" ]]; then
+          if [[ "${{ steps.lint.outcome }}" != "success" ]]; then
+            echo "::error::Lint step failed before reporting status"
+            FAILURES=$((FAILURES + 1))
+          fi
           if [[ "${{ steps.lint.outputs.lint_failed }}" == "true" ]]; then
             echo "::error::TFLint checks failed"
             FAILURES=$((FAILURES + 1))
@@ -1008,6 +1066,10 @@ runs:
         fi
 
         if [[ "${{ steps.parse-steps.outputs.run_test }}" == "true" ]]; then
+          if [[ "${{ steps.test.outcome }}" != "success" ]]; then
+            echo "::error::Test step failed before reporting status"
+            FAILURES=$((FAILURES + 1))
+          fi
           if [[ "${{ steps.test.outputs.test_failed }}" == "true" ]]; then
             echo "::error::OpenTofu tests failed"
             FAILURES=$((FAILURES + 1))
