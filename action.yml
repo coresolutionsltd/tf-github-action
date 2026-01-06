@@ -697,19 +697,28 @@ runs:
           LINT_EXIT=$INIT_EXIT
         fi
 
+        LINT_ISSUE_COUNT=$(grep -Eo '[0-9]+ issue\\(s\\) found' lint_output.txt | head -1 | awk '{print $1}')
+        if [ -z "$LINT_ISSUE_COUNT" ]; then
+          LINT_ISSUE_COUNT=$(grep -E ":[0-9]+:[0-9]+: (Warning|Error|Notice) -" lint_output.txt | wc -l | tr -d ' ')
+        fi
+        if [ -z "$LINT_ISSUE_COUNT" ]; then
+          LINT_ISSUE_COUNT=0
+        fi
+
         if [ "$LINT_EXIT" -eq 0 ]; then
           LINT_STATUS="pass"
           LINT_DETAILS="No issues found."
           echo "lint_failed=false" >> $GITHUB_OUTPUT
         else
           LINT_STATUS="fail"
-          LINT_DETAILS="TFLint reported issues."
+          LINT_DETAILS="${LINT_ISSUE_COUNT} issue(s) found."
           echo "lint_failed=true" >> $GITHUB_OUTPUT
         fi
 
         echo "lint_ran=true" >> $GITHUB_OUTPUT
         echo "lint_skipped=false" >> $GITHUB_OUTPUT
         echo "lint_status=$LINT_STATUS" >> $GITHUB_OUTPUT
+        echo "lint_issue_count=$LINT_ISSUE_COUNT" >> $GITHUB_OUTPUT
         printf 'lint_details=%s\n' "$LINT_DETAILS" >> "$GITHUB_OUTPUT"
 
         if [ "$LINT_STATUS" = "pass" ]; then
@@ -718,12 +727,30 @@ runs:
           LINT_SUMMARY_STATUS="❌ Fail"
         fi
 
+        LINT_OUTPUT=""
+        if [ "$LINT_STATUS" = "fail" ]; then
+          LINT_ISSUES=$(grep -E ":[0-9]+:[0-9]+: (Warning|Error|Notice) -" lint_output.txt || true)
+          if [ -z "$LINT_ISSUES" ]; then
+            LINT_ISSUES=$(cat lint_output.txt)
+          fi
+          LINT_OUTPUT=$(printf '%s\n' \
+            "### ⚠️ Lint Issues" \
+            "TFLint reported ${LINT_ISSUE_COUNT} issue(s)." \
+            "" \
+            '```' \
+            "$LINT_ISSUES" \
+            '```' \
+          )
+        fi
+
         if [ "$SUMMARY_MODE" = "full" ]; then
           {
             printf '%s\n' "## 🧹 Lint" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧹 TFLint | $LINT_SUMMARY_STATUS | $LINT_DETAILS |" \
+              "" \
+              "$LINT_OUTPUT" \
               ""
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
@@ -731,7 +758,7 @@ runs:
             printf '%s\n' "## 🧹 Lint" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
-              "| 🧹 TFLint | $LINT_SUMMARY_STATUS | Details redacted |" \
+              "| 🧹 TFLint | $LINT_SUMMARY_STATUS | $LINT_DETAILS |" \
               ""
           } >> "$GITHUB_STEP_SUMMARY"
         fi
@@ -839,7 +866,7 @@ runs:
         fi
 
     - name: Checks Comment
-      if: ${{ github.event_name == 'pull_request' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' && (steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_test == 'true') }}
+      if: ${{ always() && github.event_name == 'pull_request' && inputs['comment-mode'] != 'off' && inputs['comment-mode'] != 'false' && (steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_test == 'true') }}
       uses: actions/github-script@v6
       with:
         script: |
@@ -850,24 +877,15 @@ runs:
           })
           const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
           const commentMarker = `<!-- ${commentIdentifier}:checks -->`;
-          const checksComment = comments.find(comment => {
-            return comment.body && comment.body.includes(commentMarker)
-          }) || comments.find(comment => {
-            return comment.body && comment.body.includes('TF Checks Results')
-          }) || comments.find(comment => {
-            return comment.body && comment.body.includes('TF Validate Results')
-          }) || comments.find(comment => {
-            return comment.body && comment.body.includes('TF Test Results')
-          })
+          const checksComments = comments.filter(comment => comment.body && comment.body.includes(commentMarker));
 
           const rows = {};
-
-          const runValidate = '${{ steps.parse-steps.outputs.run_validate }}' === 'true';
-          const runLint = '${{ steps.parse-steps.outputs.run_lint }}' === 'true';
-          const runTest = '${{ steps.parse-steps.outputs.run_test }}' === 'true';
-
-          if (checksComment && checksComment.body) {
-            const lines = checksComment.body.split('\n');
+          const parseRows = (body) => {
+            const parsed = {};
+            if (!body) {
+              return parsed;
+            }
+            const lines = body.split('\n');
             for (const line of lines) {
               if (!line.trim().startsWith('|')) {
                 continue;
@@ -880,9 +898,28 @@ runs:
               if (check === 'Check' || check === '-------') {
                 continue;
               }
-              rows[check] = { status: rowStatus, details: rowDetails };
+              parsed[check] = { status: rowStatus, details: rowDetails };
+            }
+            return parsed;
+          };
+
+          const orderedExisting = checksComments
+            .map(comment => ({
+              comment,
+              updatedAt: new Date(comment.updated_at || comment.created_at || 0).getTime(),
+            }))
+            .sort((a, b) => a.updatedAt - b.updatedAt);
+
+          for (const { comment } of orderedExisting) {
+            const parsedRows = parseRows(comment.body);
+            for (const [check, row] of Object.entries(parsedRows)) {
+              rows[check] = row;
             }
           }
+
+          const runValidate = '${{ steps.parse-steps.outputs.run_validate }}' === 'true';
+          const runLint = '${{ steps.parse-steps.outputs.run_lint }}' === 'true';
+          const runTest = '${{ steps.parse-steps.outputs.run_test }}' === 'true';
 
           if (runValidate) {
             const fmtFailedOutput = `${{ steps.validate.outputs.fmt_failed }}`;
@@ -921,6 +958,7 @@ runs:
             const lintSkippedOutput = `${{ steps.lint.outputs.lint_skipped }}`;
             const lintFailedOutput = `${{ steps.lint.outputs.lint_failed }}`;
             const lintStatusOutput = `${{ steps.lint.outputs.lint_status }}`;
+            const lintIssueCount = Number(`${{ steps.lint.outputs.lint_issue_count }}` || 0);
             const lintDetails = `${{ steps.lint.outputs.lint_details }}`;
             const lintOutcome = `${{ steps.lint.outcome }}`;
             const lintOutputsPresent = lintStatusOutput !== '';
@@ -938,7 +976,7 @@ runs:
 
               if (lintRan) {
                 status = lintFailed ? '❌ Fail' : '✅ Pass';
-                details = lintDetails || (lintFailed ? 'TFLint reported issues.' : 'No issues found.');
+                details = lintFailed ? `${lintIssueCount} issue(s) found.` : 'No issues found.';
               } else if (lintSkipped) {
                 details = lintDetails || 'No Terraform/OpenTofu files to lint.';
               }
@@ -1006,7 +1044,7 @@ runs:
           ];
 
           let checksSummary = `${commentMarker}
-          ### 🧪 TF Checks Results
+          ### 🧪 TF Checks
           ${tableLines.join('\n')}`;
 
           const anyFail = Object.values(rows).some(row => row.status.includes('❌'));
@@ -1017,24 +1055,45 @@ runs:
             checksSummary += `\n\nFailure details can be found in the [Workflow Summary](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
           }
 
-          if (checksComment) {
-            github.rest.issues.updateComment({
+          let primaryComment = null;
+          if (orderedExisting.length > 0) {
+            primaryComment = orderedExisting[orderedExisting.length - 1].comment;
+          }
+
+          if (primaryComment) {
+            await github.rest.issues.updateComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              comment_id: checksComment.id,
+              comment_id: primaryComment.id,
               body: checksSummary
             })
           } else {
-            github.rest.issues.createComment({
+            const created = await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: checksSummary
             })
+            primaryComment = created.data;
+          }
+
+          const deletable = checksComments.filter(comment => {
+            if (!primaryComment || comment.id === primaryComment.id) {
+              return false;
+            }
+            const isBot = comment.user && comment.user.type === 'Bot';
+            return isBot || (comment.body && comment.body.includes(commentMarker));
+          });
+          for (const comment of deletable) {
+            await github.rest.issues.deleteComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: comment.id,
+            })
           }
 
     - name: Check for check failures
-      if: ${{ steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_test == 'true' }}
+      if: ${{ always() && (steps.parse-steps.outputs.run_validate == 'true' || steps.parse-steps.outputs.run_lint == 'true' || steps.parse-steps.outputs.run_test == 'true') }}
       shell: bash
       run: |
         FAILURES=0
