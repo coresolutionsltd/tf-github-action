@@ -697,9 +697,9 @@ runs:
           LINT_EXIT=$INIT_EXIT
         fi
 
-        LINT_ISSUE_COUNT=$(grep -Eo '[0-9]+ issue\\(s\\) found' lint_output.txt | head -1 | awk '{print $1}')
+        LINT_ISSUE_COUNT=$( { grep -Eo '[0-9]+ issue\\(s\\) found' lint_output.txt | head -1 | awk '{print $1}'; } || true)
         if [ -z "$LINT_ISSUE_COUNT" ]; then
-          LINT_ISSUE_COUNT=$(grep -E ":[0-9]+:[0-9]+: (Warning|Error|Notice) -" lint_output.txt | wc -l | tr -d ' ')
+          LINT_ISSUE_COUNT=$( { grep -E ":[0-9]+:[0-9]+: (Warning|Error|Notice) -" lint_output.txt | wc -l | tr -d ' '; } || true)
         fi
         if [ -z "$LINT_ISSUE_COUNT" ]; then
           LINT_ISSUE_COUNT=0
