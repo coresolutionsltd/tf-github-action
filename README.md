@@ -57,7 +57,7 @@ Workflow summaries are automatically updated from the different stages, this mak
 | `test-tfvars` | <p>Comma, space or newline separated key-value pairs for test variables (defaults to tfvars)</p> | `false` | `""` |
 | `tflint-version` | <p>TFLint version to install</p> | `false` | `latest` |
 | `trivy-version` | <p>Trivy version to install</p> | `false` | `latest` |
-| `trivy-args` | <p>Extra Trivy CLI arguments</p> | `false` | `""` |
+| `trivy-scan-type` | <p>Trivy scan type (e.g., config, fs)</p> | `false` | `config` |
 | `checkov-version` | <p>Checkov version to install</p> | `false` | `latest` |
 | `checkov-args` | <p>Extra Checkov CLI arguments</p> | `false` | `""` |
 | `checkov-skip-checks` | <p>Comma, space or newline separated list of Checkov checks to skip</p> | `false` | `""` |
@@ -160,11 +160,11 @@ Workflow summaries are automatically updated from the different stages, this mak
     # Required: false
     # Default: latest
 
-    trivy-args:
-    # Extra Trivy CLI arguments
+    trivy-scan-type:
+    # Trivy scan type (e.g., config, fs)
     #
     # Required: false
-    # Default: ""
+    # Default: config
 
     checkov-version:
     # Checkov version to install
@@ -521,7 +521,7 @@ Use `.trivy.yaml` and `.checkov.yaml` in your repo to override the defaults.
 
 #### Trivy
 
-Trivy scans IaC configuration using `.trivy.yaml` and `steps: trivy`. Use `trivy-args` for additional CLI flags and `trivy-version` to pin the version.
+Trivy scans IaC configuration using `.trivy.yaml` and `steps: trivy`. Use `trivy-version` to pin the version, and `trivy-scan-type` if you need `fs` instead of `config`.
 
 ```yaml
 - name: Trivy scan

@@ -285,7 +285,7 @@ jobs:
           - name: "Valid"
             workdir: "test/valid"
             expect_failure: false
-          - name: "Scan"
+          - name: "Findings"
             workdir: "test/scan"
             expect_failure: true
     steps:
@@ -331,7 +331,7 @@ jobs:
           - name: "Valid"
             workdir: "test/valid"
             expect_failure: false
-          - name: "Scan"
+          - name: "Findings"
             workdir: "test/scan"
             expect_failure: true
     steps:

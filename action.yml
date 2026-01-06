@@ -58,10 +58,10 @@ inputs:
     description: 'Trivy version to install'
     required: false
     default: 'latest'
-  trivy-args:
-    description: 'Extra Trivy CLI arguments'
+  trivy-scan-type:
+    description: 'Trivy scan type (e.g., config, fs)'
     required: false
-    default: ''
+    default: 'config'
   checkov-version:
     description: 'Checkov version to install'
     required: false
@@ -828,23 +828,49 @@ runs:
           } >> "$GITHUB_STEP_SUMMARY"
         fi
 
-    - name: Setup Trivy
+    - name: Resolve Trivy config
+      id: trivy-config
       if: ${{ steps.parse-steps.outputs.run_trivy == 'true' }}
       shell: bash
+      working-directory: ${{ inputs.workdir }}
       run: |
-        TRIVY_VERSION="${{ inputs['trivy-version'] }}"
-
-        if [ -z "$TRIVY_VERSION" ] || [ "$TRIVY_VERSION" = "latest" ]; then
-          TRIVY_VERSION=$(curl -s https://api.github.com/repos/aquasecurity/trivy/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+        TRIVY_CONFIG=""
+        if [ -f ".trivy.yaml" ]; then
+          TRIVY_CONFIG="$(pwd)/.trivy.yaml"
+        elif [ -f "$GITHUB_WORKSPACE/.trivy.yaml" ]; then
+          TRIVY_CONFIG="$GITHUB_WORKSPACE/.trivy.yaml"
+        elif [ -f "$GITHUB_ACTION_PATH/.trivy.yaml" ]; then
+          TRIVY_CONFIG="$GITHUB_ACTION_PATH/.trivy.yaml"
         fi
 
-        curl -sSL -o /tmp/trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-        tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
-        install -m 0755 /tmp/trivy "$HOME/.local/bin/trivy"
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        trivy --version
+        echo "config_path=$TRIVY_CONFIG" >> $GITHUB_OUTPUT
 
-    - name: Trivy Scan
+    - name: Trivy precheck
+      id: trivy-precheck
+      if: ${{ steps.parse-steps.outputs.run_trivy == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        if ! find . \( -name "*.tf" -o -name "*.tf.json" -o -name "*.tfvars" -o -name "*.tfvars.json" \) -print -quit | grep -q .; then
+          echo "skip_trivy=true" >> $GITHUB_OUTPUT
+        else
+          echo "skip_trivy=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run Trivy
+      id: trivy-run
+      if: ${{ steps.parse-steps.outputs.run_trivy == 'true' && steps.trivy-precheck.outputs.skip_trivy != 'true' }}
+      continue-on-error: true
+      uses: aquasecurity/trivy-action@v0.9.2
+      with:
+        scan-type: ${{ inputs['trivy-scan-type'] }}
+        scan-ref: ${{ inputs.workdir }}
+        format: json
+        output: ${{ inputs.workdir }}/trivy_output.json
+        version: ${{ inputs['trivy-version'] }}
+        trivy-config: ${{ steps.trivy-config.outputs.config_path }}
+
+    - name: Trivy Summary
       id: trivy
       if: ${{ steps.parse-steps.outputs.run_trivy == 'true' }}
       shell: bash
@@ -865,25 +891,7 @@ runs:
             ;;
         esac
 
-        TRIVY_ARGS="${{ inputs['trivy-args'] }}"
-        if [ -n "$TRIVY_ARGS" ]; then
-          TRIVY_ARGS=$(echo "$TRIVY_ARGS" | xargs)
-        fi
-
-        TRIVY_CONFIG=""
-        if [ -f ".trivy.yaml" ]; then
-          TRIVY_CONFIG="$(pwd)/.trivy.yaml"
-        elif [ -f "$GITHUB_WORKSPACE/.trivy.yaml" ]; then
-          TRIVY_CONFIG="$GITHUB_WORKSPACE/.trivy.yaml"
-        elif [ -f "$GITHUB_ACTION_PATH/.trivy.yaml" ]; then
-          TRIVY_CONFIG="$GITHUB_ACTION_PATH/.trivy.yaml"
-        fi
-        TRIVY_CONFIG_ARG=""
-        if [ -n "$TRIVY_CONFIG" ]; then
-          TRIVY_CONFIG_ARG="--config $TRIVY_CONFIG"
-        fi
-
-        if ! find . \( -name "*.tf" -o -name "*.tf.json" -o -name "*.tfvars" -o -name "*.tfvars.json" \) -print -quit | grep -q .; then
+        if [ "${{ steps.trivy-precheck.outputs.skip_trivy }}" = "true" ]; then
           echo "::warning::No Terraform/OpenTofu files found to scan with Trivy in '${{ inputs.workdir }}'."
           echo "trivy_ran=false" >> $GITHUB_OUTPUT
           echo "trivy_skipped=true" >> $GITHUB_OUTPUT
@@ -894,11 +902,7 @@ runs:
           exit 0
         fi
 
-        set +e
-        trivy config $TRIVY_CONFIG_ARG $TRIVY_ARGS --format json --output trivy_output.json .
-        TRIVY_EXIT=$?
-        set -e
-
+        TRIVY_OUTCOME="${{ steps.trivy-run.outcome }}"
         TRIVY_ISSUE_COUNT=0
         if [ -f trivy_output.json ]; then
           TRIVY_ISSUE_COUNT=$(jq '[.Results[]?.Misconfigurations[]? | select(.Status == "FAIL")] | length' trivy_output.json 2>/dev/null || echo 0)
@@ -908,7 +912,7 @@ runs:
           TRIVY_ISSUE_COUNT=0
         fi
 
-        if [ "$TRIVY_EXIT" -eq 0 ]; then
+        if [ "$TRIVY_OUTCOME" = "success" ]; then
           TRIVY_STATUS="pass"
           TRIVY_DETAILS="${TRIVY_ISSUE_COUNT} issue(s) found."
           echo "trivy_failed=false" >> $GITHUB_OUTPUT

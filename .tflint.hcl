@@ -1,9 +1,11 @@
-config {
-  module = false
+rule "terraform_naming_convention" {
+  enabled = true
 }
 
-plugin "terraform" {
+rule "terraform_documented_outputs" {
   enabled = true
-  version = "0.13.0"
-  source  = "github.com/terraform-linters/tflint-ruleset-terraform"
+}
+
+rule "terraform_documented_variables" {
+  enabled = true
 }
