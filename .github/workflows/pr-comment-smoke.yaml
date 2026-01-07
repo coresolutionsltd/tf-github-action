@@ -1,0 +1,27 @@
+name: Tofu PR Comment Smoke
+
+on:
+  pull_request:
+
+permissions:
+  id-token: write
+  actions: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  pr-comment-smoke:
+    name: PR Comment Smoke (Validate/Plan/Apply)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run action with PR comments
+        uses: ./
+        with:
+          workdir: test/valid
+          env: pr-comment
+          steps: validate,plan,apply
+          summary-mode: redacted
+          skip-plan-upload: true
