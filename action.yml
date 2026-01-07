@@ -1101,13 +1101,16 @@ runs:
         CHECKOV_OUTPUT=""
         if [ "$CHECKOV_ISSUE_COUNT" -gt 0 ]; then
           CHECKOV_ISSUES=$(jq -r '
+            def sev_prefix:
+              (.severity // "") as $s |
+              if ($s | tostring | length) == 0 or $s == "UNKNOWN" then "" else "[" + $s + "] " end;
             if .results and .results.failed_checks then
               .results.failed_checks[]? |
-              "- [" + (.severity // "UNKNOWN") + "] " + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue") +
+              "- " + sev_prefix + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue") +
               (if .file_path then " (" + .file_path + (if .resource then ", " + .resource else "" end) + ")" else "" end)
             elif .failed_checks then
               .failed_checks[]? |
-              "- [" + (.severity // "UNKNOWN") + "] " + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue")
+              "- " + sev_prefix + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue")
             else
               empty
             end
