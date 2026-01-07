@@ -498,6 +498,8 @@ runs:
       if: ${{ steps.parse-steps.outputs.run_validate == 'true' }}
       shell: bash
       working-directory: ${{ inputs.workdir }}
+      env:
+        ENV_SUFFIX: ${{ inputs.env != '' && format(' ({0})', inputs.env) || '' }}
       run: |
         SUMMARY_MODE="${{ inputs['summary-mode'] }}"
 
@@ -653,7 +655,7 @@ runs:
 
         if [ "$SUMMARY_MODE" = "full" ]; then
           {
-            printf '%s\n' "## 🧪 Tofu Validate" "" "$VALIDATION_SUMMARY" "" "$VALIDATION_ERRORS"
+            printf '%s\n' "## 🧪 Tofu Validate${ENV_SUFFIX}" "" "$VALIDATION_SUMMARY" "" "$VALIDATION_ERRORS"
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
           FMT_STATUS="✅ Pass"
@@ -677,7 +679,7 @@ runs:
             "| 🔍 Tofu Validate | $VALIDATE_STATUS | $VALIDATE_DETAIL |" \
           )
           {
-            printf '%s\n' "## 🧪 Tofu Validate" "" "$REDACTED_SUMMARY" ""
+            printf '%s\n' "## 🧪 Tofu Validate${ENV_SUFFIX}" "" "$REDACTED_SUMMARY" ""
           } >> "$GITHUB_STEP_SUMMARY"
         fi
 
@@ -693,6 +695,8 @@ runs:
       if: ${{ steps.parse-steps.outputs.run_lint == 'true' }}
       shell: bash
       working-directory: ${{ inputs.workdir }}
+      env:
+        ENV_SUFFIX: ${{ inputs.env != '' && format(' ({0})', inputs.env) || '' }}
       run: |
         SUMMARY_MODE="${{ inputs['summary-mode'] }}"
 
@@ -802,7 +806,7 @@ runs:
 
         if [ "$SUMMARY_MODE" = "full" ]; then
           {
-            printf '%s\n' "## 🧹 Tofu Lint" "" \
+            printf '%s\n' "## 🧹 Tofu Lint${ENV_SUFFIX}" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧹 TFLint | $LINT_SUMMARY_STATUS | $LINT_DETAILS |" \
@@ -812,7 +816,7 @@ runs:
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
           {
-            printf '%s\n' "## 🧹 Tofu Lint" "" \
+            printf '%s\n' "## 🧹 Tofu Lint${ENV_SUFFIX}" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧹 TFLint | $LINT_SUMMARY_STATUS | $LINT_DETAILS |" \
@@ -867,6 +871,8 @@ runs:
       if: ${{ steps.parse-steps.outputs.run_trivy == 'true' }}
       shell: bash
       working-directory: ${{ inputs.workdir }}
+      env:
+        ENV_SUFFIX: ${{ inputs.env != '' && format(' ({0})', inputs.env) || '' }}
       run: |
         SUMMARY_MODE="${{ inputs['summary-mode'] }}"
 
@@ -952,7 +958,7 @@ runs:
 
         if [ "$SUMMARY_MODE" = "full" ]; then
           {
-            printf '%s\n' "## 🛡️ Tofu Trivy" "" \
+            printf '%s\n' "## 🛡️ Tofu Trivy${ENV_SUFFIX}" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🛡️ Trivy | $TRIVY_SUMMARY_STATUS | $TRIVY_DETAILS |" \
@@ -962,7 +968,7 @@ runs:
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
           {
-            printf '%s\n' "## 🛡️ Tofu Trivy" "" \
+            printf '%s\n' "## 🛡️ Tofu Trivy${ENV_SUFFIX}" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🛡️ Trivy | $TRIVY_SUMMARY_STATUS | $TRIVY_DETAILS |" \
@@ -1020,6 +1026,8 @@ runs:
       if: ${{ steps.parse-steps.outputs.run_checkov == 'true' }}
       shell: bash
       working-directory: ${{ inputs.workdir }}
+      env:
+        ENV_SUFFIX: ${{ inputs.env != '' && format(' ({0})', inputs.env) || '' }}
       run: |
         SUMMARY_MODE="${{ inputs['summary-mode'] }}"
 
@@ -1130,7 +1138,7 @@ runs:
 
         if [ "$SUMMARY_MODE" = "full" ]; then
           {
-            printf '%s\n' "## 🔐 Tofu Checkov" "" \
+            printf '%s\n' "## 🔐 Tofu Checkov${ENV_SUFFIX}" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🔐 Checkov | $CHECKOV_SUMMARY_STATUS | $CHECKOV_DETAILS |" \
@@ -1140,7 +1148,7 @@ runs:
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
           {
-            printf '%s\n' "## 🔐 Tofu Checkov" "" \
+            printf '%s\n' "## 🔐 Tofu Checkov${ENV_SUFFIX}" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🔐 Checkov | $CHECKOV_SUMMARY_STATUS | $CHECKOV_DETAILS |" \
@@ -1153,6 +1161,8 @@ runs:
       if: ${{ steps.parse-steps.outputs.run_test == 'true' }}
       shell: bash
       working-directory: ${{ inputs.workdir }}
+      env:
+        ENV_SUFFIX: ${{ inputs.env != '' && format(' ({0})', inputs.env) || '' }}
       run: |
         SUMMARY_MODE="${{ inputs['summary-mode'] }}"
 
@@ -1234,7 +1244,7 @@ runs:
 
         if [ "$SUMMARY_MODE" = "full" ]; then
           {
-            printf '%s\n' "## 🧪 Tofu Test" "" \
+            printf '%s\n' "## 🧪 Tofu Test${ENV_SUFFIX}" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧪 $TEST_DIR_LABEL | $TEST_SUMMARY_STATUS | $TEST_DETAILS |" \
@@ -1242,7 +1252,7 @@ runs:
           } >> "$GITHUB_STEP_SUMMARY"
         elif [ "$SUMMARY_MODE" = "redacted" ]; then
           {
-            printf '%s\n' "## 🧪 Tofu Test" "" \
+            printf '%s\n' "## 🧪 Tofu Test${ENV_SUFFIX}" "" \
               "| Check | Status | Details |" \
               "|-------|--------|---------|" \
               "| 🧪 $TEST_DIR_LABEL | $TEST_SUMMARY_STATUS | Details redacted |" \
@@ -1261,7 +1271,14 @@ runs:
             issue_number: context.issue.number,
           })
           const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
-          const commentMarker = `<!-- ${commentIdentifier}:checks -->`;
+          const envLabelRaw = `${{ inputs.env }}`;
+          const envLabel = envLabelRaw ? envLabelRaw.trim() : '';
+          const envTag = envLabel
+            ? envLabel.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+            : '';
+          const markerSuffix = envTag ? `:${envTag}` : '';
+          const commentMarker = `<!-- ${commentIdentifier}:checks${markerSuffix} -->`;
+          const checksHeader = `### 🧪 Tofu Checks${envLabel ? ` (${envLabel})` : ''}`;
           const checksComments = comments.filter(comment => comment.body && comment.body.includes(commentMarker));
 
           const rows = {};
@@ -1509,7 +1526,7 @@ runs:
           ];
 
           let checksSummary = `${commentMarker}
-          ### 🧪 Tofu Checks
+          ${checksHeader}
           ${tableLines.join('\n')}`;
 
           const anyFail = Object.values(rows).some(row => row.status.includes('❌'));
@@ -1634,6 +1651,7 @@ runs:
       working-directory: ${{ inputs.workdir }}
       env:
         PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
+        ENV_SUFFIX: ${{ inputs.env != '' && format(' ({0})', inputs.env) || '' }}
       shell: bash
       run: |
         PLAN_ARGS="${{ steps.parse-cli-args.outputs.plan_args }}"
@@ -1651,6 +1669,7 @@ runs:
             exit 1
             ;;
         esac
+        PLAN_TITLE="## 🏗️ Tofu Plan${ENV_SUFFIX}"
 
         tofu plan ${{ steps.parse-tfvar-files.outputs.tfvar-file-args }} ${{ steps.parse-tfvars.outputs.tfvar-args }} $PLAN_ARGS -input=false -out $PLAN_NAME.tfplan
 
@@ -1675,7 +1694,7 @@ runs:
 
         if [ "$SUMMARY_MODE" != "off" ]; then
           cat << PLAN_EOF >> "$GITHUB_STEP_SUMMARY"
-        ## 🏗️ Tofu Plan
+        $PLAN_TITLE
 
         | Action | Count |
         |--------|-------|
@@ -1720,14 +1739,25 @@ runs:
             issue_number: context.issue.number,
           })
           const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
-          const commentMarker = `<!-- ${commentIdentifier}:plan -->`;
-          const planComment = comments.find(comment => {
+          const envLabelRaw = `${{ inputs.env }}`;
+          const envLabel = envLabelRaw ? envLabelRaw.trim() : '';
+          const envTag = envLabel
+            ? envLabel.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+            : '';
+          const markerSuffix = envTag ? `:${envTag}` : '';
+          const commentMarker = `<!-- ${commentIdentifier}:plan${markerSuffix} -->`;
+          let planComment = comments.find(comment => {
             return comment.body && comment.body.includes(commentMarker)
-          }) || comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes('Tofu Plan')
-          })
+          });
+          if (!planComment && !envLabel) {
+            planComment = comments.find(comment => {
+              return comment.user.type === 'Bot' && comment.body.includes('Tofu Plan')
+            })
+          }
           const hasChanges = '${{ steps.plan.outputs.has_changes }}' === 'true';
           const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
+          const heading = `### 🏗️ Tofu Plan${envLabel ? ` (${envLabel})` : ''}`;
+          const noChangeHeading = `#### 🏗️ Tofu Plan${envLabel ? ` (${envLabel})` : ''}`;
 
           const summaryTable = `
           | Action | Count |
@@ -1741,7 +1771,7 @@ runs:
 
           if (hasChanges) {
             plan = `${commentMarker}
-            ### 🏗️ Tofu Plan
+            ${heading}
             ${summaryTable}
             `;
             if (summaryMode === 'full') {
@@ -1749,7 +1779,7 @@ runs:
             }
           } else {
             plan = `${commentMarker}
-            #### 🏗️ Tofu Plan
+            ${noChangeHeading}
             ${summaryTable}
 
             \`\`\`hcl
@@ -1821,6 +1851,7 @@ runs:
       working-directory: ${{ inputs.workdir }}
       env:
         PLAN_NAME: ${{ inputs.env != '' && format('{0}-plan', inputs.env) || 'plan' }}
+        ENV_SUFFIX: ${{ inputs.env != '' && format(' ({0})', inputs.env) || '' }}
       shell: bash
       run: |
         APPLY_ARGS="${{ steps.parse-cli-args.outputs.apply_args }}"
@@ -1838,6 +1869,7 @@ runs:
             exit 1
             ;;
         esac
+        APPLY_TITLE="## 🚀 Tofu Apply${ENV_SUFFIX}"
 
         gunzip "$PLAN_NAME.tfplan.gz"
         tofu apply -input=false -auto-approve -json -concise $APPLY_ARGS "$PLAN_NAME.tfplan" 2>&1 | tee apply_output.json
@@ -1901,7 +1933,7 @@ runs:
 
         if [ "$SUMMARY_MODE" != "off" ]; then
           cat << APPLY_EOF >> "$GITHUB_STEP_SUMMARY"
-        ## 🚀 Tofu Apply
+        $APPLY_TITLE
 
         ### Summary
         **Resources:** ${ADDED} added, ${CHANGED} changed, ${DESTROYED} destroyed
@@ -1943,12 +1975,21 @@ runs:
             issue_number: context.issue.number,
           })
           const commentIdentifier = `${{ inputs['comment-identifier'] }}` || 'tf-github-action';
-          const commentMarker = `<!-- ${commentIdentifier}:apply -->`;
-          const applyComment = comments.find(comment => {
+          const envLabelRaw = `${{ inputs.env }}`;
+          const envLabel = envLabelRaw ? envLabelRaw.trim() : '';
+          const envTag = envLabel
+            ? envLabel.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+            : '';
+          const markerSuffix = envTag ? `:${envTag}` : '';
+          const commentMarker = `<!-- ${commentIdentifier}:apply${markerSuffix} -->`;
+          let applyComment = comments.find(comment => {
             return comment.body && comment.body.includes(commentMarker)
-          }) || comments.find(comment => {
-            return comment.user.type === 'Bot' && comment.body.includes('Tofu Apply')
-          })
+          });
+          if (!applyComment && !envLabel) {
+            applyComment = comments.find(comment => {
+              return comment.user.type === 'Bot' && comment.body.includes('Tofu Apply')
+            })
+          }
           const summaryMode = `${{ inputs['summary-mode'] }}` || 'full';
 
           const added = Number('${{ steps.apply.outputs.added }}' || 0);
@@ -1957,8 +1998,9 @@ runs:
           const imported = Number('${{ steps.apply.outputs.imported }}' || 0);
           const forgotten = Number('${{ steps.apply.outputs.forgotten }}' || 0);
 
+          const heading = `### 🚀 Tofu Apply${envLabel ? ` (${envLabel})` : ''}`;
           let applySummary = `${commentMarker}
-          ### 🚀 Tofu Apply
+          ${heading}
           **Resources:** ${added} added, ${changed} changed, ${destroyed} destroyed
           ${imported > 0 ? `**Imported:** ${imported}` : ''}
           ${forgotten > 0 ? `**Forgotten:** ${forgotten}` : ''}

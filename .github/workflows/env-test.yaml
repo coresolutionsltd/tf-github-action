@@ -1,4 +1,4 @@
-name: Tofu PR Comment Test
+name: Tofu Env Tests
 
 on:
   pull_request:
@@ -10,18 +10,24 @@ permissions:
   pull-requests: write
 
 jobs:
-  pr-comment-test:
-    name: PR Comment Test (Validate/Plan/Apply)
+  validate-plan-apply:
+    name: Environment Test
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env:
+          - dev
+          - prod
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run action with PR comments
+      - name: Run action with env (${{ matrix.env }})
         uses: ./
         with:
           workdir: test/valid
-          env: pr-comment-test
+          env: ${{ matrix.env }}
           steps: validate,plan,apply
-          summary-mode: redacted
+          summary-mode: full
           skip-plan-upload: true
+          comment-mode: sticky
