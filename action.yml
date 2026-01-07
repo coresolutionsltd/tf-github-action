@@ -62,14 +62,6 @@ inputs:
     description: 'Trivy scan type (e.g., config, fs)'
     required: false
     default: 'config'
-  checkov-version:
-    description: 'Checkov version to install'
-    required: false
-    default: 'latest'
-  checkov-args:
-    description: 'Extra Checkov CLI arguments'
-    required: false
-    default: ''
   checkov-skip-checks:
     description: 'Comma, space or newline separated list of Checkov checks to skip'
     required: false
@@ -489,17 +481,17 @@ runs:
       shell: bash
       run: |
         CHECKOV_SKIP_CHECKS="${{ inputs['checkov-skip-checks'] }}"
-        CHECKOV_SKIP_ARG=""
+        CHECKOV_SKIP_LIST=""
 
         if [ -n "$CHECKOV_SKIP_CHECKS" ]; then
           NORMALISED_CHECKS=$(echo "$CHECKOV_SKIP_CHECKS" | tr '\n,' ' ' | tr -s ' ')
           CHECKS_LIST=$(echo "$NORMALISED_CHECKS" | tr ' ' ',' | sed 's/^,*//;s/,*$//;s/,,*/,/g')
           if [ -n "$CHECKS_LIST" ]; then
-            CHECKOV_SKIP_ARG="--skip-check $CHECKS_LIST"
+            CHECKOV_SKIP_LIST="$CHECKS_LIST"
           fi
         fi
 
-        echo "checkov-skip-arg=$CHECKOV_SKIP_ARG" >> $GITHUB_OUTPUT
+        echo "checkov_skip_checks=$CHECKOV_SKIP_LIST" >> $GITHUB_OUTPUT
 
     - name: Validate
       id: validate
@@ -861,7 +853,7 @@ runs:
       id: trivy-run
       if: ${{ steps.parse-steps.outputs.run_trivy == 'true' && steps.trivy-precheck.outputs.skip_trivy != 'true' }}
       continue-on-error: true
-      uses: aquasecurity/trivy-action@v0.33.1
+      uses: aquasecurity/trivy-action@0.33.1
       with:
         scan-type: ${{ inputs['trivy-scan-type'] }}
         scan-ref: ${{ inputs.workdir }}
@@ -978,21 +970,52 @@ runs:
           } >> "$GITHUB_STEP_SUMMARY"
         fi
 
-    - name: Setup Checkov
+    - name: Resolve Checkov config
+      id: checkov-config
       if: ${{ steps.parse-steps.outputs.run_checkov == 'true' }}
       shell: bash
       run: |
-        CHECKOV_VERSION="${{ inputs['checkov-version'] }}"
+        CHECKOV_CONFIG=""
+        WORKDIR="${{ inputs.workdir }}"
 
-        if [ -z "$CHECKOV_VERSION" ] || [ "$CHECKOV_VERSION" = "latest" ]; then
-          python3 -m pip install --upgrade checkov
-        else
-          python3 -m pip install --upgrade "checkov==${CHECKOV_VERSION}"
+        if [ -f "$WORKDIR/.checkov.yaml" ]; then
+          CHECKOV_CONFIG="$WORKDIR/.checkov.yaml"
+        elif [ -f "$GITHUB_WORKSPACE/.checkov.yaml" ]; then
+          CHECKOV_CONFIG=".checkov.yaml"
+        elif [ -f "$GITHUB_ACTION_PATH/.checkov.yaml" ]; then
+          DEFAULT_CONFIG=".checkov.action.yaml"
+          cp "$GITHUB_ACTION_PATH/.checkov.yaml" "$GITHUB_WORKSPACE/$DEFAULT_CONFIG"
+          CHECKOV_CONFIG="$DEFAULT_CONFIG"
         fi
 
-        checkov --version
+        echo "config_path=$CHECKOV_CONFIG" >> $GITHUB_OUTPUT
+        echo "output_path=${{ inputs.workdir }}/checkov_output.json," >> $GITHUB_OUTPUT
 
-    - name: Checkov Scan
+    - name: Checkov precheck
+      id: checkov-precheck
+      if: ${{ steps.parse-steps.outputs.run_checkov == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.workdir }}
+      run: |
+        if ! find . \( -name "*.tf" -o -name "*.tf.json" -o -name "*.tfvars" -o -name "*.tfvars.json" \) -print -quit | grep -q .; then
+          echo "skip_checkov=true" >> $GITHUB_OUTPUT
+        else
+          echo "skip_checkov=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run Checkov
+      id: checkov-run
+      if: ${{ steps.parse-steps.outputs.run_checkov == 'true' && steps.checkov-precheck.outputs.skip_checkov != 'true' }}
+      continue-on-error: true
+      uses: bridgecrewio/checkov-action@v12
+      with:
+        directory: ${{ inputs.workdir }}
+        output_format: json
+        output_file_path: ${{ steps.checkov-config.outputs.output_path }}
+        config_file: ${{ steps.checkov-config.outputs.config_path }}
+        skip_check: ${{ steps.parse-checkov-skip-checks.outputs.checkov_skip_checks }}
+
+    - name: Checkov Summary
       id: checkov
       if: ${{ steps.parse-steps.outputs.run_checkov == 'true' }}
       shell: bash
@@ -1013,26 +1036,7 @@ runs:
             ;;
         esac
 
-        CHECKOV_ARGS="${{ inputs['checkov-args'] }}"
-        CHECKOV_SKIP_ARG="${{ steps.parse-checkov-skip-checks.outputs.checkov-skip-arg }}"
-        if [ -n "$CHECKOV_ARGS" ]; then
-          CHECKOV_ARGS=$(echo "$CHECKOV_ARGS" | xargs)
-        fi
-
-        CHECKOV_CONFIG=""
-        if [ -f ".checkov.yaml" ]; then
-          CHECKOV_CONFIG="$(pwd)/.checkov.yaml"
-        elif [ -f "$GITHUB_WORKSPACE/.checkov.yaml" ]; then
-          CHECKOV_CONFIG="$GITHUB_WORKSPACE/.checkov.yaml"
-        elif [ -f "$GITHUB_ACTION_PATH/.checkov.yaml" ]; then
-          CHECKOV_CONFIG="$GITHUB_ACTION_PATH/.checkov.yaml"
-        fi
-        CHECKOV_CONFIG_ARG=""
-        if [ -n "$CHECKOV_CONFIG" ]; then
-          CHECKOV_CONFIG_ARG="--config-file $CHECKOV_CONFIG"
-        fi
-
-        if ! find . \( -name "*.tf" -o -name "*.tf.json" -o -name "*.tfvars" -o -name "*.tfvars.json" \) -print -quit | grep -q .; then
+        if [ "${{ steps.checkov-precheck.outputs.skip_checkov }}" = "true" ]; then
           echo "::warning::No Terraform/OpenTofu files found to scan with Checkov in '${{ inputs.workdir }}'."
           echo "checkov_ran=false" >> $GITHUB_OUTPUT
           echo "checkov_skipped=true" >> $GITHUB_OUTPUT
@@ -1043,13 +1047,14 @@ runs:
           exit 0
         fi
 
-        set +e
-        checkov -d . $CHECKOV_CONFIG_ARG $CHECKOV_SKIP_ARG $CHECKOV_ARGS --output json > checkov_output.json
-        CHECKOV_EXIT=$?
-        set -e
-
+        CHECKOV_OUTCOME="${{ steps.checkov-run.outcome }}"
+        CHECKOV_OUTPUT_FILE="checkov_output.json"
+        if [ ! -f "$CHECKOV_OUTPUT_FILE" ] && [ -f "${CHECKOV_OUTPUT_FILE}," ]; then
+          CHECKOV_OUTPUT_FILE="${CHECKOV_OUTPUT_FILE},"
+        fi
+        CHECKOV_OUTPUT_NAME=$(basename "$CHECKOV_OUTPUT_FILE")
         CHECKOV_ISSUE_COUNT=0
-        if [ -f checkov_output.json ]; then
+        if [ -f "$CHECKOV_OUTPUT_FILE" ]; then
           CHECKOV_ISSUE_COUNT=$(jq -r '
             if .summary and (.summary.failed // .summary.failed_checks // .summary.failed_count) then
               (.summary.failed // .summary.failed_checks // .summary.failed_count)
@@ -1060,14 +1065,14 @@ runs:
             else
               0
             end
-          ' checkov_output.json 2>/dev/null || echo 0)
+          ' "$CHECKOV_OUTPUT_FILE" 2>/dev/null || echo 0)
         fi
 
         if [ -z "$CHECKOV_ISSUE_COUNT" ]; then
           CHECKOV_ISSUE_COUNT=0
         fi
 
-        if [ "$CHECKOV_EXIT" -eq 0 ]; then
+        if [ "$CHECKOV_OUTCOME" = "success" ]; then
           CHECKOV_STATUS="pass"
           CHECKOV_DETAILS="${CHECKOV_ISSUE_COUNT} issue(s) found."
           echo "checkov_failed=false" >> $GITHUB_OUTPUT
@@ -1098,17 +1103,17 @@ runs:
           CHECKOV_ISSUES=$(jq -r '
             if .results and .results.failed_checks then
               .results.failed_checks[]? |
-              "- " + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue") +
+              "- [" + (.severity // "UNKNOWN") + "] " + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue") +
               (if .file_path then " (" + .file_path + (if .resource then ", " + .resource else "" end) + ")" else "" end)
             elif .failed_checks then
               .failed_checks[]? |
-              "- " + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue")
+              "- [" + (.severity // "UNKNOWN") + "] " + (.check_id // "UNKNOWN") + ": " + (.check_name // "Issue")
             else
               empty
             end
-          ' checkov_output.json 2>/dev/null || true)
+          ' "$CHECKOV_OUTPUT_FILE" 2>/dev/null || true)
           if [ -z "$CHECKOV_ISSUES" ]; then
-            CHECKOV_ISSUES="Checkov findings available in checkov_output.json."
+            CHECKOV_ISSUES="Checkov findings available in ${CHECKOV_OUTPUT_NAME}."
           fi
           CHECKOV_OUTPUT=$(printf '%s\n' \
             "### ⚠️ Checkov Issues" \

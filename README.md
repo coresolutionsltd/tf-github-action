@@ -58,8 +58,6 @@ Workflow summaries are automatically updated from the different stages, this mak
 | `tflint-version` | <p>TFLint version to install</p> | `false` | `latest` |
 | `trivy-version` | <p>Trivy version to install</p> | `false` | `latest` |
 | `trivy-scan-type` | <p>Trivy scan type (e.g., config, fs)</p> | `false` | `config` |
-| `checkov-version` | <p>Checkov version to install</p> | `false` | `latest` |
-| `checkov-args` | <p>Extra Checkov CLI arguments</p> | `false` | `""` |
 | `checkov-skip-checks` | <p>Comma, space or newline separated list of Checkov checks to skip</p> | `false` | `""` |
 | `lock-timeout` | <p>State lock timeout for plan/apply (e.g., 5m)</p> | `false` | `""` |
 | `parallelism` | <p>Parallelism for plan/apply</p> | `false` | `""` |
@@ -165,18 +163,6 @@ Workflow summaries are automatically updated from the different stages, this mak
     #
     # Required: false
     # Default: config
-
-    checkov-version:
-    # Checkov version to install
-    #
-    # Required: false
-    # Default: latest
-
-    checkov-args:
-    # Extra Checkov CLI arguments
-    #
-    # Required: false
-    # Default: ""
 
     checkov-skip-checks:
     # Comma, space or newline separated list of Checkov checks to skip
@@ -533,7 +519,7 @@ Trivy scans IaC configuration using `.trivy.yaml` and `steps: trivy`. Use `trivy
 
 #### Checkov
 
-Checkov scans IaC configuration using `.checkov.yaml` and `steps: checkov`. Use `checkov-skip-checks` for quick exclusions and `checkov-args` for additional CLI flags.
+Checkov scans IaC configuration using `.checkov.yaml` and `steps: checkov`. Use `checkov-skip-checks` for quick exclusions, with additional settings in `.checkov.yaml`.
 
 ```yaml
 - name: Checkov scan
