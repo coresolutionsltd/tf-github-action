@@ -7,17 +7,17 @@ branding:
 
 inputs:
   version:
-    description: "The OpenTofu version to install (e.g., 1.11.x)."
+    description: 'The OpenTofu version to install (e.g., 1.11.x).'
     required: false
-    default: "1.11.x"
+    default: '1.11.x'
   workdir:
-    description: "Path to the Tofu configuration directory (relative to repository root)."
+    description: 'Path to the Tofu configuration directory (relative to repository root).'
     required: false
-    default: "."
+    default: '.'
   env:
-    description: "Deployment environment (eg `dev`, `staging` or `prod`). Accepts any string."
+    description: 'Deployment environment (eg `dev`, `staging` or `prod`). Accepts any string.'
     required: false
-    default: ""
+    default: ''
   steps:
     description: 'Steps to run: `validate`, `plan`, `apply`, `test`, `lint`, `trivy`, `checkov` (comma, space or newline separated). Use `all`` to run all steps.'
     required: false
@@ -105,7 +105,7 @@ inputs:
 
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
     - name: Setup OpenTofu
       uses: opentofu/setup-opentofu@v1
